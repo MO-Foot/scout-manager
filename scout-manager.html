@@ -1280,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:05</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:20</div>
         </div>
       </div>
     </header>
@@ -7857,6 +7857,7 @@ function renderRadunoDettaglio(content) {
             Importa/aggiungi da Excel
             <input type="file" accept=".xlsx,.xls" id="input-importa-raduno-dett" style="display:none;">
           </label>
+          ${(r.rosa && r.rosa.length) || (r.repartiPersonalizzati && r.repartiPersonalizzati.length) ? `<button class="btn btn-ghost btn-sm" id="btn-svuota-rosa-raduno" title="Toglie tutti i giocatori dalla rosa di questo raduno (utile prima di un import da Excel pulito, per non mischiare con eventuali rimasugli di import precedenti)">Svuota rosa</button>` : ""}
           <button class="btn btn-ghost btn-sm" id="btn-torna-lista-raduni">← Torna alla lista</button>
         </div>
       </div>
@@ -7943,6 +7944,16 @@ function renderRadunoDettaglio(content) {
     document.getElementById("btn-esporta-raduno-ufficiale").onclick = () => esportaKaderlisteUfficiale(r);
   }
   document.getElementById("input-importa-raduno-dett").addEventListener("change", (e) => avviaImportRaduno(e, r.id));
+  if (document.getElementById("btn-svuota-rosa-raduno")) {
+    document.getElementById("btn-svuota-rosa-raduno").onclick = () => {
+      const nGiocatori = (r.rosa || []).length;
+      if (!confirm(`Svuotare la rosa di "${r.nome}"? Verranno tolti tutti i ${nGiocatori} giocatori da questo raduno (le loro schede in Elenco restano intatte, vengono solo scollegati da qui) e ripuliti eventuali reparti personalizzati vuoti/residui. Utile prima di un nuovo import da Excel, per non mischiare con rimasugli di import precedenti.`)) return;
+      r.rosa = [];
+      r.repartiPersonalizzati = [];
+      savePlayers();
+      render();
+    };
+  }
 
   document.getElementById("rd-modulo-rapido").onchange = (e) => {
     r.modulo = e.target.value;
