@@ -1280,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:45</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:05</div>
         </div>
       </div>
     </header>
@@ -7398,7 +7398,7 @@ const REPARTI_GRID_PER_MODULO = {
   "1-4-4-2": [
     [ { id: "TH", chiave: "TH", nome: "Portiere (TH)" } ],
     [ { id: "AVE_dx", chiave: "AVE", nome: "Terzino DX (AVE)" }, { id: "IVE_dx", chiave: "IVE", nome: "Difensore centrale DX (IVE)" }, { id: "IVE_sx", chiave: "IVE", nome: "Difensore centrale SX (IVE)" }, { id: "AVE_sx", chiave: "AVE", nome: "Terzino SX (AVE)" } ],
-    [ { id: "STA_dx", chiave: "STA", nome: "Flügel DX (STA)" }, { id: "MFZ_dx", chiave: "MFZ", nome: "Mittelfeld DX (MFZ)" }, { id: "MFZ_sx", chiave: "MFZ", nome: "Mittelfeld SX (MFZ)" }, { id: "STA_sx", chiave: "STA", nome: "Flügel SX (STA)" } ],
+    [ { id: "STA_dx", chiave: "STA", nome: "Flügel DX (STA)" }, { id: "MFZ_dx", chiave: "MFZ", nome: "Mittelfeld DX (MFZ)" }, { id: "MFZ_sx", chiave: "MFZ", nome: "Mittelfeld SX (MFZ)" }, { id: "STA_sx", chiave: "MFA", nome: "Flügel SX (MFA)" } ],
     [ { id: "STZ_10", chiave: "STZ", nome: "10er Zentral (STZ)" } ],
     [ { id: "STZ_punta", chiave: "STZ", nome: "Stürmer (STZ)" } ]
   ],
@@ -8433,8 +8433,12 @@ function indizioSlotDaTesto(nomeOriginale, slotsChiave) {
 // blocchi con la stessa chiave ma nessun indizio testuale vengono distribuiti
 // in ordine sugli slot disponibili con quella chiave (round-robin); se la
 // chiave non esiste affatto nella griglia del modulo (es. una variante
-// regionale tipo "MFA"), resta la chiave grezza: diventerà un reparto
+// regionale non prevista), resta la chiave grezza: diventerà un reparto
 // personalizzato al momento della conferma, così nessun giocatore va perso.
+// NOTA 1-4-4-2: nel file federale i due esterni alti non condividono la
+// stessa sigla ("FLÜGELSPIELER (STA)" per la fascia DX, "MITTELFELD AUSSEN
+// (MFA)" per quella SX) — per questo lo slot Flügel SX ha chiave "MFA" e non
+// "STA" nella griglia sopra, invece di affidarsi al round-robin.
 function assegnaSlotDefaultImport(scheda) {
   const griglia = REPARTI_GRID_PER_MODULO[scheda.modulo] || REPARTI_GRID_PER_MODULO[MODULI_RADUNO[0]];
   const slotsPiatti = griglia.flat();
@@ -8493,7 +8497,16 @@ function avviaVerificaImportRaduno(wb, nomiFogli, targetId, fileName) {
   nomiFogli.forEach(nomeFoglio => {
     const ws = wb.Sheets[nomeFoglio];
     if (!ws) return;
-    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
+    // IMPORTANTE: blankrows deve restare true (default). Con blankrows:false
+    // SheetJS toglie dall'array le righe completamente vuote del foglio,
+    // "comprimendo" gli indici: l'indice di riga nell'array (ri) non
+    // corrisponde più al numero di riga reale del foglio Excel dopo la prima
+    // riga vuota saltata. parseFoglioKaderliste passa (ri, ci) direttamente a
+    // statoDaCellaExcel per leggere il colore della cella nel foglio originale
+    // — con gli indici disallineati quella lettura cade su celle sbagliate
+    // (spesso bianche), quindi lo stato/colore non veniva mai riconosciuto.
+    // Bug riscontrato: dopo l'import nessun giocatore risultava colorato.
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: true, defval: "" });
     const scheda = parseFoglioKaderliste(aoa, ws);
     if (scheda.reparti.length) {
       scheda.nomeFoglio = nomeFoglio;
