@@ -753,11 +753,14 @@ body{
   cursor: pointer;
   padding: 4px 8px;
 }
-.raduno-candidato-riga{ display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+/* Flex invece di grid a colonne fisse: righe con giocatori già in rosa o
+   con un colore non riconosciuto mostrano chip in più rispetto alle altre,
+   e con un grid a colonne fisse quei contenuti in più avrebbero sfalsato
+   l'allineamento delle colonne tra una riga e l'altra. */
+.raduno-candidato-riga{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .raduno-candidato-riga:last-child{ border-bottom: none; }
-@media (max-width: 640px){
-  .raduno-candidato-riga{ grid-template-columns: 1fr; }
-}
+.raduno-candidato-riga > span:first-child{ flex: 1 1 160px; }
+.raduno-candidato-riga select{ flex: 0 0 auto; }
 .tabella-report-stampa{ width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; margin-top: 14px; }
 .tabella-report-stampa th, .tabella-report-stampa td{ border: 1px solid #999; padding: 5px 6px; text-align: left; vertical-align: top; overflow-wrap: break-word; word-break: break-word; }
 .tabella-report-stampa th{ background: #eee !important; font-size: 10px; line-height: 1.2; }
@@ -1266,7 +1269,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 11:41</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 19:46</div>
         </div>
       </div>
     </header>
@@ -8122,7 +8125,51 @@ function radunoRepartoHTML(r, rep) {
   `;
 }
 
-/* ---- Import da Excel Kaderliste ---- */
+/* ---- Import da Excel Kaderliste: riconoscimento colore → stato ----
+ * Nel file Excel il colore di sfondo del nome è quello che indica lo stato
+ * del giocatore (Kaderspieler, Pikett-Spieler, ecc. — vedi RADUNO_LEGENDA):
+ * lo leggiamo qui in fase di import per riportarlo automaticamente in app,
+ * invece di dover ricliccare a mano lo stato di ogni giocatore già colorato
+ * in Excel. I colori possono essere scritti in due modi diversi dentro il
+ * file: RGB diretto (es. "FFFF00") oppure riferimento a un colore del tema
+ * del file (indice + eventuale "tint" per schiarire/scurire) — la tabella
+ * qui sotto è quella del tema usato nel modello ufficiale che ci ha dato
+ * Mattia; se in futuro arriva un file con un tema diverso, i colori a tema
+ * (tipicamente solo il grigio di Verletzt/Abgesagt e il verde di Sichtung
+ * Klub) potrebbero non essere riconosciuti — quelli diretti (rosso, giallo,
+ * arancione) funzionano comunque sempre.
+ */
+const KADERLISTE_TEMA_COLORI = ["FFFFFF", "000000", "E8E8E8", "0E2841", "156082", "E97132", "196B24", "0F9ED5", "A02B93", "4EA72E"];
+function kaderlisteApplicaTint(hex, tint) {
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  const applica = (c) => tint < 0 ? c * (1 + tint) : c * (1 - tint) + 255 * tint;
+  const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  return [r, g, b].map(c => clamp(applica(c)).toString(16).padStart(2, "0").toUpperCase()).join("");
+}
+// Colore ufficiale (uguale a quello usato in RADUNO_LEGENDA/esportaKaderlisteUfficiale)
+// → chiave di stato dell'app. "BFBFBF" è condiviso da Verletzt e Abgesagt
+// nel file originale (sono letteralmente lo stesso colore anche in Excel):
+// non potendoli distinguere dal colore, in import scegliamo di default
+// "verletzt" — se un giocatore è invece "Abgesagt" va corretto a mano dal
+// menu che compare nella schermata di verifica import.
+const KADERLISTE_COLORE_A_STATO = { "FF0000": "kaderspieler", "FFFF00": "pikett", "FFC000": "nachnominiert", "BFBFBF": "verletzt", "4EA72E": "sichtungklub" };
+// Legge il colore di riempimento della cella (riga/colonna 0-based, formato
+// SheetJS) e prova a farlo corrispondere a uno stato noto. Richiede che il
+// workbook sia stato letto con {cellStyles:true} (vedi avviaImportRaduno),
+// altrimenti cell.s non esiste e non c'è nulla da leggere.
+function statoDaCellaExcel(ws, riga, colonna) {
+  if (!ws) return { stato: null, coloreGrezzo: null };
+  const cell = ws[XLSX.utils.encode_cell({ r: riga, c: colonna })];
+  const fg = cell && cell.s && (cell.s.fgColor || cell.s.bgColor);
+  if (!fg) return { stato: null, coloreGrezzo: null };
+  let hex = null;
+  if (fg.rgb) hex = String(fg.rgb).slice(-6).toUpperCase();
+  else if (fg.theme !== undefined && KADERLISTE_TEMA_COLORI[fg.theme]) hex = kaderlisteApplicaTint(KADERLISTE_TEMA_COLORI[fg.theme], fg.tint || 0);
+  if (!hex || hex === "FFFFFF") return { stato: null, coloreGrezzo: null }; // bianco/nessun colore = nessuno stato, non è un "colore sconosciuto"
+  const stato = KADERLISTE_COLORE_A_STATO[hex] || null;
+  return { stato, coloreGrezzo: stato ? null : hex };
+}
+
 function normalizzaNomeRaduno(s) {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
 }
@@ -8201,7 +8248,7 @@ function estraiMetaGiocatore(row, colonnaNome) {
   return { klub, jg, fuss };
 }
 
-function parseFoglioKaderliste(aoa) {
+function parseFoglioKaderliste(aoa, ws) {
   const scheda = {
     nome: "", luogo: "", stagione: "", trainer: "", assistente1: "", assistente2: "",
     thTrainer: "", athletik: "", analyst: "", tom: "", modulo: null, annata: null,
@@ -8278,7 +8325,8 @@ function parseFoglioKaderliste(aoa) {
         if (testo.length < 3) continue;
         if (RADUNO_TESTO_NON_NOME.test(testo)) continue; // intestazioni colonna, note a piè di pagina, ecc.
         const meta = estraiMetaGiocatore(row, ci);
-        repartoAttivo.giocatori.push({ grezzo: testo, riga: ri, klub: meta.klub, jg: meta.jg, fuss: meta.fuss });
+        const { stato, coloreGrezzo } = statoDaCellaExcel(ws, ri, ci);
+        repartoAttivo.giocatori.push({ grezzo: testo, riga: ri, klub: meta.klub, jg: meta.jg, fuss: meta.fuss, stato, coloreGrezzo });
       }
     }
 
@@ -8352,14 +8400,17 @@ async function avviaImportRaduno(e, targetId) {
   const file = e.target.files[0];
   if (!file) return;
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
+  // cellStyles:true serve a poter leggere il colore di sfondo di ogni cella
+  // (vedi statoDaCellaExcel) per riportare in app lo stato dei giocatori già
+  // colorati in Excel, oltre ai soli nomi.
+  const wb = XLSX.read(buf, { type: "array", cellStyles: true });
 
   const schede = [];
   wb.SheetNames.forEach(nomeFoglio => {
     if (/^turnier/i.test(nomeFoglio) || /^blatt/i.test(nomeFoglio)) return; // fogli non pertinenti noti
     const ws = wb.Sheets[nomeFoglio];
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
-    const scheda = parseFoglioKaderliste(aoa);
+    const scheda = parseFoglioKaderliste(aoa, ws);
     if (scheda.reparti.length) {
       scheda.nomeFoglio = nomeFoglio;
       scheda.nome = scheda.nome || nomeFoglio;
@@ -8381,7 +8432,7 @@ async function avviaImportRaduno(e, targetId) {
     scheda.reparti.forEach(rep => {
       rep.candidati = rep.giocatori.map(g => {
         const match = trovaGiocatoreCorrispondente(g.grezzo);
-        return { grezzo: g.grezzo, match, slotId: rep.slotIdDefault, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "" };
+        return { grezzo: g.grezzo, match, slotId: rep.slotIdDefault, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "", stato: g.stato || null, coloreGrezzo: g.coloreGrezzo || null };
       });
     });
   });
@@ -8437,6 +8488,12 @@ function renderRadunoImporta(content) {
       bozza.schede[si].reparti[repI].candidati[cIdx].slotId = sel.value;
     });
   });
+  content.querySelectorAll("[data-cambia-stato-candidato]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [si, repI, cIdx] = sel.dataset.cambiaStatoCandidato.split("|").map(Number);
+      bozza.schede[si].reparti[repI].candidati[cIdx].stato = sel.value || null;
+    });
+  });
 }
 
 function radunoSchedaImportHTML(s, si, targetRaduno) {
@@ -8462,7 +8519,7 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
       ${s.reparti.map((rep, repI) => `
         <div style="margin-bottom:10px;">
           <strong>${esc(rep.nomeOriginale)}</strong>
-          ${rep.candidati.map((c, cIdx) => radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions)).join("")}
+          ${rep.candidati.map((c, cIdx) => radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions, targetRaduno)).join("")}
         </div>
       `).join("")}
       <div class="import-actions">
@@ -8473,16 +8530,23 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
   `;
 }
 
-function radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions) {
+function radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions, targetRaduno) {
   const key = `${si}|${repI}|${cIdx}`;
   const metaBits = [c.klub, c.jg ? "'" + c.jg : "", c.fuss].filter(Boolean).join(" · ");
+  const giaNelRaduno = targetRaduno && c.match && (targetRaduno.rosa || []).some(x => x.giocatoreId === c.match.id);
   return `
     <div class="raduno-candidato-riga">
       <span>${esc(c.grezzo)}${metaBits ? ` <span class="muted" style="font-size:11.5px;">(${esc(metaBits)})</span>` : ""}</span>
       <span class="chip ${c.match ? "chip-active" : ""}" style="font-size:11.5px;">${c.match ? "In Elenco: " + esc(c.match.cognome + " " + c.match.nome) : "Nuovo giocatore"}</span>
+      ${giaNelRaduno ? `<span class="chip" style="font-size:11.5px;" title="Reparto e stato verranno aggiornati con quelli di questo import">Già nel raduno — verrà aggiornato</span>` : ""}
       <select data-cambia-reparto-candidato="${key}">
         ${repartiOptions.map(r => `<option value="${esc(r.id)}" ${r.id === c.slotId ? "selected" : ""}>${esc(r.nome)}</option>`).join("")}
       </select>
+      <select data-cambia-stato-candidato="${key}" title="Stato rilevato dal colore della cella in Excel — correggilo se non è giusto">
+        <option value="" ${!c.stato ? "selected" : ""}>Nessuno stato</option>
+        ${RADUNO_LEGENDA.map(st => `<option value="${esc(st.chiave)}" ${c.stato === st.chiave ? "selected" : ""}>${esc(st.nome)}</option>`).join("")}
+      </select>
+      ${c.coloreGrezzo ? `<span class="chip" style="font-size:11px;" title="Il colore della cella in Excel (#${esc(c.coloreGrezzo)}) non corrisponde a nessuno stato conosciuto — controlla a mano se serve">Colore #${esc(c.coloreGrezzo)} non riconosciuto</span>` : ""}
       <label class="report-campo-check">
         <input type="checkbox" data-toggle-candidato="${key}" ${c.includi ? "checked" : ""}> includi
       </label>
@@ -8506,10 +8570,12 @@ function confermaImportScheda(si) {
     raduni.push(raduno);
   }
 
-  let nuoviGiocatori = 0, aggiunti = 0;
+  let nuoviGiocatori = 0, aggiunti = 0, aggiornati = 0;
+  const coloriNonRiconosciuti = [];
   s.reparti.forEach(rep => {
     rep.candidati.forEach(c => {
       if (!c.includi) return;
+      if (c.coloreGrezzo) coloriNonRiconosciuti.push(`${c.grezzo} (#${c.coloreGrezzo})`);
       // Se lo slot scelto non fa parte della griglia fissa del modulo,
       // registriamolo come reparto personalizzato del raduno così da non
       // perdere il gruppo (es. varianti regionali tipo "MFA").
@@ -8542,8 +8608,17 @@ function confermaImportScheda(si) {
         giocatoreId = nuovo.id;
         nuoviGiocatori++;
       }
-      if (!raduno.rosa.some(x => x.giocatoreId === giocatoreId)) {
-        raduno.rosa.push({ giocatoreId, reparto: c.slotId });
+      // Se il giocatore è già in rosa in questo raduno (es. stavi
+      // re-importando la stessa scheda dopo aver aggiornato qualcosa in
+      // Excel), aggiorniamo reparto e stato con quelli di questo import
+      // invece di lasciarlo invariato: il file Excel fa da "fonte di
+      // verità" per tutto quello che scegli di includere qui.
+      const vociEsistenti = raduno.rosa.filter(x => x.giocatoreId === giocatoreId);
+      if (vociEsistenti.length) {
+        vociEsistenti.forEach(voce => { voce.reparto = c.slotId; voce.stato = c.stato || null; });
+        aggiornati++;
+      } else {
+        raduno.rosa.push({ giocatoreId, reparto: c.slotId, stato: c.stato || null });
         aggiunti++;
       }
     });
@@ -8551,7 +8626,11 @@ function confermaImportScheda(si) {
 
   bozza.schede.splice(si, 1);
   savePlayers();
-  alert(`Importato: ${aggiunti} giocatori aggiunti al raduno "${raduno.nome}" (${nuoviGiocatori} nuove schede create in Elenco — ricordati di completarle con data di nascita e gli altri dati mancanti).`);
+  let messaggio = `Importato nel raduno "${raduno.nome}": ${aggiunti} giocatori aggiunti, ${aggiornati} già presenti aggiornati (reparto/stato) (${nuoviGiocatori} nuove schede create in Elenco — ricordati di completarle con data di nascita e gli altri dati mancanti).`;
+  if (coloriNonRiconosciuti.length) {
+    messaggio += `\n\nAttenzione: il colore della cella non è stato riconosciuto per ${coloriNonRiconosciuti.length} giocatori (sono comunque stati importati, ma senza stato assegnato):\n${coloriNonRiconosciuti.join("\n")}`;
+  }
+  alert(messaggio);
 
   if (bozza.schede.length) {
     render();
