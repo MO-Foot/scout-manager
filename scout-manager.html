@@ -879,6 +879,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
 .visionatura-row{ grid-template-columns: 130px 1fr 1fr 1fr 32px; }
 .valutazione-row{ grid-template-columns: 120px 1fr 80px 1fr 1fr 32px; }
 .misurazione-row{ grid-template-columns: 120px 76px 76px 90px 1fr 100px 32px; }
+.osservazione-allenatore-row{ grid-template-columns: 130px 1fr 32px; }
 .partita-row-block{
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1020,6 +1021,8 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   border-bottom: 1px dashed var(--line);
 }
 .c-check{ font-size: 13px; color: var(--chalk); display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.allenatore-contatti{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.allenatore-contatti a.btn{ text-decoration: none; }
 .candidato-grid{
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -1101,7 +1104,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   .risultati-container{ grid-template-columns: 1fr; }
 
   .form-grid{ grid-template-columns: 1fr; }
-  .dyn-row, .visionatura-row, .valutazione-row, .trasferimento-row, .misurazione-row{ grid-template-columns: 1fr; }
+  .dyn-row, .visionatura-row, .valutazione-row, .trasferimento-row, .misurazione-row, .osservazione-allenatore-row{ grid-template-columns: 1fr; }
   .partita-row-line1, .partita-row-line2{ grid-template-columns: 1fr; }
   .dyn-row input, .valutazione-row input{ width: 100%; }
   .valutazione-gruppo-edit-header, .qg-parametro-row{ grid-template-columns: 1fr; }
@@ -1277,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:03</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:35</div>
         </div>
       </div>
     </header>
@@ -1287,6 +1290,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       <button class="navtab" id="nav-nuova" type="button">Nuova Scheda</button>
       <button class="navtab" id="nav-calendario" type="button">Calendario</button>
       <button class="navtab" id="nav-raduni" type="button">Raduni U16</button>
+      <button class="navtab" id="nav-allenatori" type="button">Allenatori</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
     </nav>
 
@@ -1381,6 +1385,7 @@ function etichetteDaFilename(nomeFile) {
 let players = [];
 let eventi = [];
 let raduni = [];
+let allenatori = [];
 
 // Il file su Dropbox era storicamente un array nudo di giocatori. Poi è
 // diventato {players, eventi}, e ora contiene anche i raduni TYT, quindi il
@@ -1390,8 +1395,8 @@ let raduni = [];
 function parseDatabaseJSON(text) {
   const parsed = text && text.trim() ? JSON.parse(text) : [];
   const risultato = Array.isArray(parsed)
-    ? { players: parsed, eventi: [], raduni: [] }
-    : { players: parsed.players || [], eventi: parsed.eventi || [], raduni: parsed.raduni || [] };
+    ? { players: parsed, eventi: [], raduni: [], allenatori: [] }
+    : { players: parsed.players || [], eventi: parsed.eventi || [], raduni: parsed.raduni || [], allenatori: parsed.allenatori || [] };
   migraTuttiSquadraCategorie(risultato.players);
   return risultato;
 }
@@ -1864,7 +1869,7 @@ const CHIAVE_SYNC_IN_SOSPESO = "sync-in-sospeso";
 let sincronizzazioneInSospeso = false;
 
 async function salvaDatiLocali() {
-  await idbSet(CHIAVE_DATI_LOCALI, { players, eventi, raduni, salvatoIl: new Date().toISOString() });
+  await idbSet(CHIAVE_DATI_LOCALI, { players, eventi, raduni, allenatori, salvatoIl: new Date().toISOString() });
 }
 
 async function caricaDatiLocali() {
@@ -1987,6 +1992,7 @@ async function completaConnessioneDropbox(code) {
     players = risultato.players;
     eventi = risultato.eventi || [];
     raduni = risultato.raduni || [];
+    allenatori = risultato.allenatori || [];
     renderDropboxStatusBar("connesso");
     render();
     if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -2023,12 +2029,12 @@ async function scaricaDaDropbox() {
       "Dropbox-API-Arg": JSON.stringify({ path: dropboxFilePath })
     }
   });
-  if (resp.status === 409) { ultimoContenutoRemoto = ""; return { players: [], eventi: [], fileNonTrovato: true }; } // nessun file a questo percorso
+  if (resp.status === 409) { ultimoContenutoRemoto = ""; return { players: [], eventi: [], raduni: [], allenatori: [], fileNonTrovato: true }; } // nessun file a questo percorso
   if (!resp.ok) throw new Error("errore nel download da Dropbox (" + resp.status + ")");
   const text = await resp.text();
   ultimoContenutoRemoto = text;
   try { return { ...parseDatabaseJSON(text), fileNonTrovato: false }; }
-  catch (e) { alert("Il file su Dropbox non contiene un JSON valido."); return { players: [], eventi: [], fileNonTrovato: false }; }
+  catch (e) { alert("Il file su Dropbox non contiene un JSON valido."); return { players: [], eventi: [], raduni: [], allenatori: [], fileNonTrovato: false }; }
 }
 
 function avvisaSePercorsoNonTrovato() {
@@ -2062,6 +2068,7 @@ async function verificaConflittoPrimaDiSalvare() {
         players = dati.players;
         eventi = dati.eventi;
         raduni = dati.raduni;
+        allenatori = dati.allenatori || [];
         ultimoContenutoRemoto = testoRemoto;
         render();
         return false;
@@ -2078,7 +2085,7 @@ async function caricaSuDropbox() {
   const ok = await verificaConflittoPrimaDiSalvare();
   if (!ok) return;
   const token = await assicuraTokenValido();
-  const testoNuovo = JSON.stringify({ players, eventi, raduni }, null, 2);
+  const testoNuovo = JSON.stringify({ players, eventi, raduni, allenatori }, null, 2);
   const resp = await fetch("https://content.dropboxapi.com/2/files/upload", {
     method: "POST",
     headers: {
@@ -2176,7 +2183,7 @@ async function eseguiBackupAutomaticoSeNecessario() {
       if (giorniPassati < BACKUP_INTERVALLO_GIORNI) return; // non è ancora ora
     }
     const token = await assicuraTokenValido();
-    const contenuto = JSON.stringify({ players, eventi, raduni }, null, 2);
+    const contenuto = JSON.stringify({ players, eventi, raduni, allenatori }, null, 2);
     const percorsoBackup = `${cartellaBackup()}/scout-backup-${oggi}.json`;
     const resp = await fetch("https://content.dropboxapi.com/2/files/upload", {
       method: "POST",
@@ -2214,6 +2221,7 @@ async function ricaricaDaDropbox() {
     players = risultato.players;
     eventi = risultato.eventi || [];
     raduni = risultato.raduni || [];
+    allenatori = risultato.allenatori || [];
     renderDropboxStatusBar("connesso");
     render();
     if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -2902,6 +2910,7 @@ async function boot() {
   document.getElementById("nav-nuova").onclick = () => switchTab("nuova");
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
+  document.getElementById("nav-allenatori").onclick = () => switchTab("allenatori");
   document.getElementById("nav-strumenti").onclick = () => switchTab("strumenti");
 
   logoPersonalizzato = await idbGet("logo-personalizzato").catch(() => "") || "";
@@ -2934,6 +2943,7 @@ async function boot() {
       players = localeCache.players || [];
       eventi = localeCache.eventi || [];
       raduni = localeCache.raduni || [];
+      allenatori = localeCache.allenatori || [];
     }
     sincronizzazioneInSospeso = (await idbGet(CHIAVE_SYNC_IN_SOSPESO).catch(() => false)) || false;
   } catch (e) {
@@ -2969,6 +2979,7 @@ async function boot() {
         players = risultato.players;
         eventi = risultato.eventi || [];
         raduni = risultato.raduni || [];
+        allenatori = risultato.allenatori || [];
         await salvaDatiLocali();
         renderDropboxStatusBar("connesso");
         if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -3024,8 +3035,8 @@ function switchTab(tab, editPlayer) {
 // attaccanti in un raduno). Nel secondo caso è giusto ripartire dall'alto.
 let ultimaChiaveVistaRender = null;
 function render(editPlayer) {
-  const chiaveVista = currentTab === "raduni"
-    ? `raduni|${raduniSezione}|${radunoCorrenteId || ""}`
+  const chiaveVista = currentTab === "raduni" ? `raduni|${raduniSezione}|${radunoCorrenteId || ""}`
+    : currentTab === "allenatori" ? `allenatori|${allenatoriSezione}|${allenatoreCorrenteId || ""}`
     : currentTab;
   const stessaVista = chiaveVista === ultimaChiaveVistaRender;
   const scrollDaMantenere = stessaVista ? window.scrollY : 0;
@@ -3037,6 +3048,7 @@ function render(editPlayer) {
   else if (currentTab === "nuova") renderForm(content, editPlayer || null);
   else if (currentTab === "calendario") renderCalendario(content);
   else if (currentTab === "raduni") renderRaduni(content);
+  else if (currentTab === "allenatori") renderAllenatori(content);
   else if (currentTab === "strumenti") renderStrumenti(content);
 
   window.scrollTo(0, scrollDaMantenere);
@@ -3831,6 +3843,29 @@ function apriDettaglio(id) {
         </div>
         ${p.note ? `<div class="modal-section"><h3>Note generali</h3><p class="muted">${esc(p.note)}</p>${p.noteModificateIl ? `<p class="muted" style="font-size:11px; margin-top:4px;">Nota aggiornata il ${formatDataIt(p.noteModificateIl)}</p>` : ""}</div>` : ""}
         ${(() => {
+          const info = allenatoreDelGiocatore(p);
+          if (info.ambiguo) {
+            return `<div class="modal-section">
+              <h3>Allenatore</h3>
+              <p class="muted">Più allenatori corrispondono alla squadra "${esc(p.squadra || "")}": ${info.candidati.map(c => esc(c.nome)).join(", ")}. Scegline uno dalla scheda del giocatore (campo "Allenatore") per vedere qui i contatti.</p>
+            </div>`;
+          }
+          if (!info.allenatore) return "";
+          const a = info.allenatore;
+          return `<div class="modal-section">
+            <h3>Allenatore</h3>
+            <div class="candidato-card-header" style="align-items:center;">
+              <span class="rd-apri-allenatore" data-allenatore-id="${esc(a.id)}" style="cursor:pointer; font-weight:600;">${esc(a.nome)}</span>
+              <span class="chip" style="font-size:10.5px;">${info.automatico ? "Automatico (per squadra)" : "Assegnato a mano"}</span>
+            </div>
+            <div class="allenatore-contatti" style="margin-top:6px;">
+              ${a.telefono ? `<a class="btn btn-ghost btn-sm" href="tel:${esc(a.telefono.replace(/\s+/g, ""))}">📞 ${esc(a.telefono)}</a>` : ""}
+              ${a.email ? `<a class="btn btn-ghost btn-sm" href="mailto:${esc(a.email)}">✉️ ${esc(a.email)}</a>` : ""}
+              ${!a.telefono && !a.email ? `<p class="muted">Nessun contatto salvato per questo allenatore.</p>` : ""}
+            </div>
+          </div>`;
+        })()}
+        ${(() => {
           const oggiStr = dataOggiLocale();
           const convocazioni = eventi.filter(e => (e.giocatoriIds || []).includes(p.id) && (e.data || "") >= oggiStr)
             .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
@@ -3955,6 +3990,9 @@ function apriDettaglio(id) {
   if (p.foto) {
     document.getElementById("modal-photo-el").onclick = () => apriLightbox(p.foto);
   }
+  root.querySelectorAll("[data-allenatore-id]").forEach(el => {
+    el.onclick = () => { chiudiModal(); allenatoreCorrenteId = el.dataset.allenatoreId; allenatoriSezione = "dettaglio"; switchTab("allenatori"); };
+  });
   document.getElementById("btn-elimina").onclick = () => {
     if (confirm(`Eliminare definitivamente la scheda di ${p.cognome} ${p.nome}?`)) {
       players = players.filter(pl => pl.id !== id);
@@ -4255,6 +4293,12 @@ function renderForm(content, p) {
         </label>
         <label>Squadra
           <input type="text" id="fp-squadra" list="squadre-datalist" value="${esc(p ? p.squadra : "")}">
+        </label>
+        <label>Allenatore <span class="muted" style="font-weight:400;">(automatico in base alla squadra — scegli qui solo se vuoi correggerlo o è diverso, es. Nazionale)</span>
+          <select id="fp-allenatore">
+            <option value="" ${!p || !p.allenatoreIdManuale ? "selected" : ""}>— Automatico in base alla squadra —</option>
+            ${allenatori.slice().sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it")).map(a => `<option value="${esc(a.id)}" ${p && p.allenatoreIdManuale === a.id ? "selected" : ""}>${esc(a.nome)}${a.squadra ? " — " + esc(a.squadra) : ""}</option>`).join("")}
+          </select>
         </label>
         <label>Ruolo primario
           <input type="text" id="fp-ruoloprimario" list="ruoli-datalist" value="${esc(p ? p.ruoloPrimario : "")}">
@@ -4587,6 +4631,7 @@ function salvaForm(existingId, foto) {
       cognome, nome,
       document.getElementById("fp-datanascita").value,
       document.getElementById("fp-squadra").value.trim(),
+      document.getElementById("fp-allenatore").value || null,
       document.getElementById("fp-ruoloprimario").value.trim(),
       document.getElementById("fp-ruolosecondario").value.trim(),
       document.getElementById("fp-piedepreferito").value,
@@ -4594,6 +4639,7 @@ function salvaForm(existingId, foto) {
     ];
     const anagraficaVecchia = [
       vecchioPlayer.cognome, vecchioPlayer.nome, vecchioPlayer.dataNascita, vecchioPlayer.squadra,
+      vecchioPlayer.allenatoreIdManuale || null,
       vecchioPlayer.ruoloPrimario, vecchioPlayer.ruoloSecondario, vecchioPlayer.piedePreferito, vecchioPlayer.nazionalita,
     ];
     if (diversi(anagraficaNuova, anagraficaVecchia)) sezioniModificate.push("Anagrafica");
@@ -4620,6 +4666,7 @@ function salvaForm(existingId, foto) {
     nome,
     dataNascita: document.getElementById("fp-datanascita").value,
     squadra: document.getElementById("fp-squadra").value.trim(),
+    allenatoreIdManuale: document.getElementById("fp-allenatore").value || null,
     categorie,
     squadraCategorieMigrata: true,
     ruoloPrimario: document.getElementById("fp-ruoloprimario").value.trim(),
@@ -8910,9 +8957,275 @@ function esportaRadunoExcel(r) {
   XLSX.writeFile(wbOut, `raduno-${slug || "tyt"}.xlsx`);
 }
 
+/* ===================== ALLENATORI ===================== */
+// Rubrica degli allenatori: contatti (telefono/mail) e un diario di
+// osservazioni datate (come le visionature dei giocatori) da quando li vedi
+// in una partita. Un giocatore viene collegato automaticamente
+// all'allenatore che ha la stessa squadra in scheda (stesso confronto
+// "fuzzy" già usato per la ricerca partite del weekend), ma può sempre
+// essere corretto a mano dalla scheda del giocatore (campo
+// allenatoreIdManuale) — utile perché gli allenatori cambiano spesso, e per
+// la Nazionale U16 TYT che non ha una "squadra" nel senso di club.
+let allenatoriSezione = "lista";
+let allenatoreCorrenteId = null;
+let filtroTestoAllenatori = "";
+
+function trovaAllenatoriPerSquadra(nomeSquadra) {
+  const ric = analizzaNomeSquadra(nomeSquadra);
+  if (!ric.core) return [];
+  return allenatori.filter(a => {
+    if (!a.squadra) return false;
+    const ac = analizzaNomeSquadra(a.squadra);
+    return ac.core && squadreCoerenti(ric.core, ac.core);
+  });
+}
+
+// Risolve l'allenatore "giusto" per un giocatore: prima l'assegnazione
+// manuale (se impostata e ancora esistente), altrimenti il collegamento
+// automatico per squadra. candidati è popolato anche quando ambiguo (più
+// allenatori diversi risultano collegati alla stessa squadra) così chi
+// mostra il risultato può segnalarlo invece di indovinare quale usare.
+function allenatoreDelGiocatore(p) {
+  if (p.allenatoreIdManuale) {
+    const a = allenatori.find(x => x.id === p.allenatoreIdManuale);
+    if (a) return { allenatore: a, automatico: false, ambiguo: false, candidati: [a] };
+  }
+  const candidati = trovaAllenatoriPerSquadra(p.squadra);
+  if (candidati.length === 1) return { allenatore: candidati[0], automatico: true, ambiguo: false, candidati };
+  if (candidati.length > 1) return { allenatore: null, automatico: true, ambiguo: true, candidati };
+  return { allenatore: null, automatico: true, ambiguo: false, candidati: [] };
+}
+
+function renderAllenatori(content) {
+  if (allenatoriSezione === "form") { renderAllenatoreForm(content); return; }
+  if (allenatoriSezione === "dettaglio") { renderAllenatoreDettaglio(content); return; }
+  renderAllenatoriLista(content);
+}
+
+function renderAllenatoriLista(content) {
+  content.innerHTML = `
+    <div class="import-box">
+      <h2>Allenatori</h2>
+      <p class="muted">Rubrica degli allenatori che segui: contatti rapidi (telefono/mail) e le osservazioni raccolte quando li vedi in partita. Un giocatore viene collegato in automatico all'allenatore con la sua stessa squadra — puoi correggerlo dalla scheda del giocatore se serve (es. Nazionale, o allenatore cambiato).</p>
+      <div class="import-actions">
+        <button class="btn btn-primary" id="btn-nuovo-allenatore">+ Nuovo allenatore</button>
+      </div>
+      <div class="filtri-bar" style="margin-top:14px;">
+        <input type="text" id="f-allenatori-testo" class="f-input f-testo" placeholder="Cerca nome o squadra..." value="${esc(filtroTestoAllenatori)}">
+      </div>
+      <div class="import-subsection" id="allenatori-container"></div>
+    </div>
+  `;
+  document.getElementById("btn-nuovo-allenatore").onclick = () => { allenatoreCorrenteId = null; allenatoriSezione = "form"; render(); };
+  document.getElementById("f-allenatori-testo").oninput = (e) => { filtroTestoAllenatori = e.target.value; renderAllenatoriRisultati(); };
+  renderAllenatoriRisultati();
+}
+
+function renderAllenatoriRisultati() {
+  const container = document.getElementById("allenatori-container");
+  if (!container) return;
+  const q = filtroTestoAllenatori.trim().toLowerCase();
+  const elenco = allenatori
+    .filter(a => !q || `${a.nome || ""} ${a.squadra || ""}`.toLowerCase().includes(q))
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
+
+  container.innerHTML = elenco.length
+    ? elenco.map(a => allenatoreCardHTML(a)).join("")
+    : `<p class="muted">${allenatori.length ? "Nessun allenatore corrisponde alla ricerca." : "Nessun allenatore ancora — aggiungine uno con “+ Nuovo allenatore”."}</p>`;
+
+  container.querySelectorAll("[data-apri-allenatore]").forEach(el => {
+    el.onclick = () => { allenatoreCorrenteId = el.dataset.apriAllenatore; allenatoriSezione = "dettaglio"; render(); };
+  });
+}
+
+function giocatoriDiAllenatore(allenatoreId) {
+  return players.filter(p => {
+    const r = allenatoreDelGiocatore(p);
+    return r.allenatore && r.allenatore.id === allenatoreId;
+  });
+}
+
+function allenatoreCardHTML(a) {
+  const nGiocatori = giocatoriDiAllenatore(a.id).length;
+  const nOsservazioni = (a.osservazioni || []).length;
+  return `
+    <div class="candidato-card" data-apri-allenatore="${esc(a.id)}" style="cursor:pointer;">
+      <div class="candidato-card-header">
+        <strong>${esc(a.nome || "Allenatore senza nome")}</strong>
+        ${a.squadra ? `<span class="chip" style="margin-left:8px;">${esc(a.squadra)}</span>` : ""}
+        <span class="chip" style="margin-left:8px;">${nGiocatori} giocator${nGiocatori === 1 ? "e" : "i"} collegat${nGiocatori === 1 ? "o" : "i"}</span>
+        ${nOsservazioni ? `<span class="chip" style="margin-left:8px;">${nOsservazioni} osservazion${nOsservazioni === 1 ? "e" : "i"}</span>` : ""}
+      </div>
+      <p class="muted" style="font-size:12.5px; margin:4px 0 0;">
+        ${a.telefono ? esc(a.telefono) : ""}${a.telefono && a.email ? " · " : ""}${a.email ? esc(a.email) : ""}${!a.telefono && !a.email ? "Nessun contatto salvato" : ""}
+      </p>
+    </div>
+  `;
+}
+
+function renderAllenatoreForm(content) {
+  const a = allenatoreCorrenteId ? allenatori.find(x => x.id === allenatoreCorrenteId) : null;
+  content.innerHTML = `
+    <div class="import-box">
+      <h2>${a ? "Modifica allenatore" : "Nuovo allenatore"}</h2>
+      <div class="form-grid">
+        <label>Nome*
+          <input type="text" id="al-nome" required value="${esc(a ? a.nome : "")}">
+        </label>
+        <label>Squadra <span class="muted" style="font-weight:400;">(usata per il collegamento automatico ai giocatori)</span>
+          <input type="text" id="al-squadra" list="squadre-datalist" value="${esc(a ? a.squadra : "")}">
+        </label>
+        <label>Telefono
+          <input type="tel" id="al-telefono" value="${esc(a ? a.telefono : "")}">
+        </label>
+        <label>Email
+          <input type="email" id="al-email" value="${esc(a ? a.email : "")}">
+        </label>
+      </div>
+      <label class="full">Osservazioni <span class="muted" style="font-weight:400;">(una riga per ogni volta che lo vedi in partita — data facoltativa)</span>
+        <div id="osservazioni-container" class="dyn-rows"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-aggiungi-osservazione" style="margin-top:6px;">+ Aggiungi osservazione</button>
+      </label>
+      <div class="import-actions">
+        <button class="btn btn-primary" id="btn-salva-allenatore">${a ? "Salva modifiche" : "Crea allenatore"}</button>
+        <button class="btn btn-ghost" id="btn-annulla-allenatore">Annulla</button>
+      </div>
+    </div>
+  `;
+
+  const osservContainer = document.getElementById("osservazioni-container");
+  if (a && a.osservazioni && a.osservazioni.length) {
+    a.osservazioni.slice().sort((x, y) => (y.data || "").localeCompare(x.data || "")).forEach(o => osservContainer.appendChild(creaRigaOsservazioneAllenatore(o)));
+  }
+  document.getElementById("btn-aggiungi-osservazione").onclick = () => osservContainer.appendChild(creaRigaOsservazioneAllenatore());
+
+  document.getElementById("btn-annulla-allenatore").onclick = () => {
+    allenatoriSezione = a ? "dettaglio" : "lista";
+    render();
+  };
+  document.getElementById("btn-salva-allenatore").onclick = () => salvaAllenatoreDaForm(a);
+}
+
+function creaRigaOsservazioneAllenatore(o) {
+  o = o || {};
+  const div = document.createElement("div");
+  div.className = "dyn-row osservazione-allenatore-row";
+  div.innerHTML = `
+    <input type="date" class="oa-data" value="${esc(o.data || "")}">
+    <input type="text" class="oa-testo" placeholder="Cosa hai notato (es. buona gestione del possesso, comunica molto con la squadra...)" value="${esc(o.testo || "")}">
+    <button type="button" class="btn-remove-row" title="Rimuovi riga">✕</button>
+  `;
+  div.querySelector(".btn-remove-row").onclick = () => div.remove();
+  return div;
+}
+
+function salvaAllenatoreDaForm(vecchioAllenatore) {
+  const nome = document.getElementById("al-nome").value.trim();
+  if (!nome) { alert("Inserisci il nome dell'allenatore."); return; }
+  const osservazioni = [];
+  document.querySelectorAll("#osservazioni-container .osservazione-allenatore-row").forEach(row => {
+    const data = row.querySelector(".oa-data").value;
+    const testo = row.querySelector(".oa-testo").value.trim();
+    if (data || testo) osservazioni.push({ data, testo });
+  });
+
+  const allenatore = {
+    ...(vecchioAllenatore || {}),
+    id: vecchioAllenatore ? vecchioAllenatore.id : uid(),
+    creatoIl: vecchioAllenatore ? vecchioAllenatore.creatoIl : new Date().toISOString(),
+    nome,
+    squadra: document.getElementById("al-squadra").value.trim(),
+    telefono: document.getElementById("al-telefono").value.trim(),
+    email: document.getElementById("al-email").value.trim(),
+    osservazioni,
+  };
+
+  if (vecchioAllenatore) {
+    const idx = allenatori.findIndex(x => x.id === vecchioAllenatore.id);
+    allenatori[idx] = allenatore;
+  } else {
+    allenatori.push(allenatore);
+  }
+  savePlayers();
+  allenatoreCorrenteId = allenatore.id;
+  allenatoriSezione = "dettaglio";
+  render();
+}
+
+function eliminaAllenatore(id) {
+  const a = allenatori.find(x => x.id === id);
+  if (!a) return;
+  const collegati = giocatoriDiAllenatore(id);
+  const collegatiAMano = collegati.filter(p => p.allenatoreIdManuale === id);
+  const conferma = confirm(
+    `Eliminare l'allenatore "${a.nome}"?` +
+    (collegati.length ? `\n\n${collegati.length} giocator${collegati.length === 1 ? "e" : "i"} risult${collegati.length === 1 ? "a" : "ano"} collegat${collegati.length === 1 ? "o" : "i"} a questo allenatore` +
+      (collegatiAMano.length ? ` (${collegatiAMano.length} assegnat${collegatiAMano.length === 1 ? "o" : "i"} a mano)` : " (in automatico per squadra)") +
+      `: il collegamento verrà rimosso (torneranno ad essere collegati automaticamente in base alla squadra, se corrisponde a un altro allenatore).` : "")
+  );
+  if (!conferma) return;
+  players.forEach(p => { if (p.allenatoreIdManuale === id) p.allenatoreIdManuale = null; });
+  allenatori = allenatori.filter(x => x.id !== id);
+  savePlayers();
+  allenatoreCorrenteId = null;
+  allenatoriSezione = "lista";
+  render();
+}
+
+function renderAllenatoreDettaglio(content) {
+  const a = allenatori.find(x => x.id === allenatoreCorrenteId);
+  if (!a) { allenatoriSezione = "lista"; render(); return; }
+  const collegati = giocatoriDiAllenatore(a.id).sort((x, y) => `${x.cognome} ${x.nome}`.localeCompare(`${y.cognome} ${y.nome}`, "it"));
+  const osservazioniOrdinate = (a.osservazioni || []).slice().sort((x, y) => (y.data || "").localeCompare(x.data || ""));
+
+  content.innerHTML = `
+    <div class="import-box raduno-dettaglio-box">
+      <div class="candidato-card-header">
+        <h2 style="margin:0;">${esc(a.nome)}</h2>
+        <div class="import-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-modifica-allenatore">Modifica</button>
+          <button class="btn btn-ghost btn-sm" id="btn-elimina-allenatore">Elimina</button>
+          <button class="btn btn-ghost btn-sm" id="btn-torna-lista-allenatori">← Torna alla lista</button>
+        </div>
+      </div>
+      ${a.squadra ? `<p class="muted">${esc(a.squadra)}</p>` : ""}
+      <div class="allenatore-contatti">
+        ${a.telefono ? `<a class="btn btn-ghost btn-sm" href="tel:${esc(a.telefono.replace(/\s+/g, ""))}">📞 ${esc(a.telefono)}</a>` : ""}
+        ${a.email ? `<a class="btn btn-ghost btn-sm" href="mailto:${esc(a.email)}">✉️ ${esc(a.email)}</a>` : ""}
+        ${!a.telefono && !a.email ? `<p class="muted">Nessun contatto salvato — aggiungilo da "Modifica".</p>` : ""}
+      </div>
+
+      <div class="modal-section">
+        <h3>Osservazioni ${osservazioniOrdinate.length ? `<span class="chip" style="margin-left:8px;">${osservazioniOrdinate.length}</span>` : ""}</h3>
+        ${osservazioniOrdinate.length ? `
+          <ul class="modal-list">
+            ${osservazioniOrdinate.map(o => `<li>${o.data ? `<span class="mono">${formatDataIt(o.data)}</span> — ` : ""}${esc(o.testo || "")}</li>`).join("")}
+          </ul>
+        ` : `<p class="muted">Nessuna osservazione ancora. Aggiungine una da "Modifica" la prossima volta che lo vedi in partita.</p>`}
+      </div>
+
+      <div class="modal-section">
+        <h3>Giocatori collegati ${collegati.length ? `<span class="chip" style="margin-left:8px;">${collegati.length}</span>` : ""}</h3>
+        ${collegati.length ? `
+          <ul class="modal-list">
+            ${collegati.map(p => `<li class="rd-apri-giocatore" data-player-id="${esc(p.id)}" style="cursor:pointer;">${esc(p.cognome)} ${esc(p.nome)} ${p.squadra ? `<span class="muted">— ${esc(p.squadra)}</span>` : ""}</li>`).join("")}
+          </ul>
+        ` : `<p class="muted">Nessun giocatore collegato al momento (in automatico per squadra, o assegnato a mano dalla sua scheda).</p>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById("btn-torna-lista-allenatori").onclick = () => { allenatoriSezione = "lista"; render(); };
+  document.getElementById("btn-modifica-allenatore").onclick = () => { allenatoriSezione = "form"; render(); };
+  document.getElementById("btn-elimina-allenatore").onclick = () => eliminaAllenatore(a.id);
+  content.querySelectorAll("[data-player-id]").forEach(el => {
+    el.onclick = () => apriDettaglio(el.dataset.playerId);
+  });
+}
+
 /* ===================== BACKUP ===================== */
 function esportaBackup() {
-  const blob = new Blob([JSON.stringify({ players, eventi, raduni }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ players, eventi, raduni, allenatori }, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const oggi = dataOggiLocale();
@@ -8934,10 +9247,12 @@ function importaBackup(e) {
       const nGiocatori = dati.players.length;
       const nEventi = dati.eventi.length;
       const nRaduni = (dati.raduni || []).length;
-      if (confirm(`Il backup contiene ${nGiocatori} giocatori, ${nEventi} eventi di calendario e ${nRaduni} raduni U16. Sostituire tutti i dati attuali (${players.length} giocatori, ${eventi.length} eventi, ${raduni.length} raduni)? Premi Annulla per non fare nulla.`)) {
+      const nAllenatori = (dati.allenatori || []).length;
+      if (confirm(`Il backup contiene ${nGiocatori} giocatori, ${nEventi} eventi di calendario, ${nRaduni} raduni U16 e ${nAllenatori} allenatori. Sostituire tutti i dati attuali (${players.length} giocatori, ${eventi.length} eventi, ${raduni.length} raduni, ${allenatori.length} allenatori)? Premi Annulla per non fare nulla.`)) {
         players = dati.players;
         eventi = dati.eventi;
         raduni = dati.raduni || [];
+        allenatori = dati.allenatori || [];
         await savePlayers();
         render();
         alert("Backup ripristinato correttamente.");
