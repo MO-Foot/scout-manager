@@ -761,6 +761,14 @@ body{
 .raduno-candidato-riga:last-child{ border-bottom: none; }
 .raduno-candidato-riga > span:first-child{ flex: 1 1 160px; }
 .raduno-candidato-riga select{ flex: 0 0 auto; }
+/* Elenco fogli tra cui scegliere prima di importare (vedi
+   renderRadunoImportaScegliScheda) — scorrevole così su un file con tanti
+   fogli non allunga tutta la pagina, e con un campo di ricerca sopra si
+   trova rapidamente quello che serve anche se sono tanti. */
+.import-lista-schede{ max-height: 360px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 0; }
+.import-scheda-riga{ display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.import-scheda-riga:last-child{ border-bottom: none; }
+.import-scheda-riga:hover{ background: rgba(255,255,255,0.03); }
 .tabella-report-stampa{ width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; margin-top: 14px; }
 .tabella-report-stampa th, .tabella-report-stampa td{ border: 1px solid #999; padding: 5px 6px; text-align: left; vertical-align: top; overflow-wrap: break-word; word-break: break-word; }
 .tabella-report-stampa th{ background: #eee !important; font-size: 10px; line-height: 1.2; }
@@ -1269,7 +1277,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 19:46</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:03</div>
         </div>
       </div>
     </header>
@@ -8396,6 +8404,13 @@ function assegnaSlotDefaultImport(scheda) {
   });
 }
 
+// Legge (senza ancora leggere righe/giocatori) solo i NOMI dei fogli del
+// file caricato, e — se ce n'è più di uno — fa scegliere prima all'utente
+// quale/i importare, invece di leggere e mostrare in revisione tutti i
+// fogli del file uno via l'altro: su un file con tante schede (es. un file
+// condiviso con la Nazionale con 20-30 fogli) costringerebbe a scorrere a
+// lungo prima di arrivare a quella che interessa, con il rischio concreto
+// di confermare per sbaglio anche schede sbagliate incontrate per strada.
 async function avviaImportRaduno(e, targetId) {
   const file = e.target.files[0];
   if (!file) return;
@@ -8404,11 +8419,33 @@ async function avviaImportRaduno(e, targetId) {
   // (vedi statoDaCellaExcel) per riportare in app lo stato dei giocatori già
   // colorati in Excel, oltre ai soli nomi.
   const wb = XLSX.read(buf, { type: "array", cellStyles: true });
+  const nomiFogli = wb.SheetNames.filter(n => !/^turnier/i.test(n) && !/^blatt/i.test(n));
 
+  if (!nomiFogli.length) {
+    alert("Questo file Excel non contiene fogli riconoscibili.");
+    e.target.value = "";
+    return;
+  }
+
+  if (nomiFogli.length === 1) {
+    // Un solo foglio possibile: niente da scegliere, si passa direttamente
+    // alla lettura e revisione come prima.
+    avviaVerificaImportRaduno(wb, nomiFogli, targetId, file.name);
+  } else {
+    radunoImportBozza = { fase: "scegli", wb, sheetNames: nomiFogli, scelte: new Set(), targetId, fileName: file.name };
+    raduniSezione = "importa";
+    render();
+  }
+  e.target.value = "";
+}
+
+// Legge davvero righe/giocatori/colori solo dai fogli scelti (nomiFogli) e
+// prepara la schermata di revisione candidati per ciascuno.
+function avviaVerificaImportRaduno(wb, nomiFogli, targetId, fileName) {
   const schede = [];
-  wb.SheetNames.forEach(nomeFoglio => {
-    if (/^turnier/i.test(nomeFoglio) || /^blatt/i.test(nomeFoglio)) return; // fogli non pertinenti noti
+  nomiFogli.forEach(nomeFoglio => {
     const ws = wb.Sheets[nomeFoglio];
+    if (!ws) return;
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
     const scheda = parseFoglioKaderliste(aoa, ws);
     if (scheda.reparti.length) {
@@ -8419,8 +8456,10 @@ async function avviaImportRaduno(e, targetId) {
   });
 
   if (!schede.length) {
-    alert("Non ho trovato nessun reparto/giocatore riconoscibile in questo file. Verifica che sia un file Kaderliste TYT nel formato consueto.");
-    e.target.value = "";
+    alert(`Non ho trovato nessun reparto/giocatore riconoscibile ${nomiFogli.length === 1 ? `nel foglio "${nomiFogli[0]}"` : "nei fogli scelti"}. Verifica che sia il formato Kaderliste consueto, oppure prova un altro foglio.`);
+    radunoImportBozza = null;
+    raduniSezione = targetId ? "dettaglio" : "lista";
+    render();
     return;
   }
 
@@ -8437,15 +8476,71 @@ async function avviaImportRaduno(e, targetId) {
     });
   });
 
-  radunoImportBozza = { schede, targetId, fileName: file.name };
+  radunoImportBozza = { fase: "verifica", schede, targetId, fileName };
   raduniSezione = "importa";
   render();
-  e.target.value = "";
+}
+
+// Primo passo dell'import quando il file ha più fogli: scegliere quale/i
+// leggere PRIMA di leggerli davvero, invece di doverli scorrere tutti dopo.
+function renderRadunoImportaScegliScheda(content) {
+  const bozza = radunoImportBozza;
+  const targetRaduno = bozza.targetId ? raduni.find(x => x.id === bozza.targetId) : null;
+
+  content.innerHTML = `
+    <div class="import-box">
+      <h2>Quale foglio importare? — ${esc(bozza.fileName)}</h2>
+      <p class="muted">Il file contiene ${bozza.sheetNames.length} fogli. Scegli quello/i che vuoi importare${targetRaduno ? ` nel raduno "${esc(targetRaduno.nome)}"` : ""} — gli altri non verranno nemmeno letti, così non serve scorrerli tutti.</p>
+      <input type="text" id="import-filtro-schede" class="f-input" placeholder="Cerca nome foglio..." style="margin-bottom:10px; width:100%; max-width:320px;">
+      <div id="import-lista-schede" class="import-lista-schede">
+        ${bozza.sheetNames.map(nome => `
+          <label class="import-scheda-riga">
+            <input type="checkbox" data-scelta-foglio="${esc(nome)}" ${bozza.scelte.has(nome) ? "checked" : ""}>
+            ${esc(nome)}
+          </label>
+        `).join("")}
+      </div>
+      <div class="import-actions" style="margin-top:12px;">
+        <button class="btn btn-primary" id="btn-continua-import-schede" ${bozza.scelte.size ? "" : "disabled"}>Continua (${bozza.scelte.size} selezionat${bozza.scelte.size === 1 ? "o" : "i"})</button>
+        <button class="btn btn-ghost" id="btn-annulla-import-raduno">Annulla import</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("btn-annulla-import-raduno").onclick = () => {
+    radunoImportBozza = null;
+    raduniSezione = bozza.targetId ? "dettaglio" : "lista";
+    render();
+  };
+  document.getElementById("import-filtro-schede").addEventListener("input", (ev) => {
+    const q = ev.target.value.trim().toLowerCase();
+    content.querySelectorAll(".import-scheda-riga").forEach(riga => {
+      riga.style.display = riga.textContent.trim().toLowerCase().includes(q) ? "" : "none";
+    });
+  });
+  const aggiornaBottoneContinua = () => {
+    const btn = document.getElementById("btn-continua-import-schede");
+    if (!btn) return;
+    btn.disabled = bozza.scelte.size === 0;
+    btn.textContent = `Continua (${bozza.scelte.size} selezionat${bozza.scelte.size === 1 ? "o" : "i"})`;
+  };
+  content.querySelectorAll("[data-scelta-foglio]").forEach(chk => {
+    chk.addEventListener("change", () => {
+      if (chk.checked) bozza.scelte.add(chk.dataset.sceltaFoglio);
+      else bozza.scelte.delete(chk.dataset.sceltaFoglio);
+      aggiornaBottoneContinua();
+    });
+  });
+  const btnContinua = document.getElementById("btn-continua-import-schede");
+  if (btnContinua) {
+    btnContinua.onclick = () => avviaVerificaImportRaduno(bozza.wb, [...bozza.scelte], bozza.targetId, bozza.fileName);
+  }
 }
 
 function renderRadunoImporta(content) {
   const bozza = radunoImportBozza;
   if (!bozza) { raduniSezione = "lista"; render(); return; }
+  if (bozza.fase === "scegli") { renderRadunoImportaScegliScheda(content); return; }
   const targetRaduno = bozza.targetId ? raduni.find(x => x.id === bozza.targetId) : null;
 
   content.innerHTML = `
