@@ -1280,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:35</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 20:45</div>
         </div>
       </div>
     </header>
@@ -8533,16 +8533,25 @@ function avviaVerificaImportRaduno(wb, nomiFogli, targetId, fileName) {
 function renderRadunoImportaScegliScheda(content) {
   const bozza = radunoImportBozza;
   const targetRaduno = bozza.targetId ? raduni.find(x => x.id === bozza.targetId) : null;
+  // Quando l'import è "aggiorna la rosa di QUESTO raduno" (targetId presente),
+  // ha senso leggere un solo foglio alla volta: ogni scheda confermata finisce
+  // comunque nello stesso raduno, quindi selezionarne per sbaglio più di uno
+  // mischierebbe rose di tornei/convocazioni diversi nella stessa rosa (bug
+  // riscontrato: giocatori di un altro foglio finiti nel reparto Portiere).
+  // Per questo qui usiamo una scelta singola (radio), non multipla.
+  const singola = !!bozza.targetId;
 
   content.innerHTML = `
     <div class="import-box">
       <h2>Quale foglio importare? — ${esc(bozza.fileName)}</h2>
-      <p class="muted">Il file contiene ${bozza.sheetNames.length} fogli. Scegli quello/i che vuoi importare${targetRaduno ? ` nel raduno "${esc(targetRaduno.nome)}"` : ""} — gli altri non verranno nemmeno letti, così non serve scorrerli tutti.</p>
+      <p class="muted">Il file contiene ${bozza.sheetNames.length} fogli. ${singola
+        ? `Scegli quello che vuoi importare nel raduno "${esc(targetRaduno ? targetRaduno.nome : "")}"`
+        : "Scegli quello/i che vuoi importare"} — gli altri non verranno nemmeno letti, così non serve scorrerli tutti.${singola ? " Un foglio alla volta: se ti serve aggiornare la rosa da un altro foglio, potrai rifare l'import in un secondo momento." : ""}</p>
       <input type="text" id="import-filtro-schede" class="f-input" placeholder="Cerca nome foglio..." style="margin-bottom:10px; width:100%; max-width:320px;">
       <div id="import-lista-schede" class="import-lista-schede">
         ${bozza.sheetNames.map(nome => `
           <label class="import-scheda-riga">
-            <input type="checkbox" data-scelta-foglio="${esc(nome)}" ${bozza.scelte.has(nome) ? "checked" : ""}>
+            <input type="${singola ? "radio" : "checkbox"}" name="scelta-foglio-import" data-scelta-foglio="${esc(nome)}" ${bozza.scelte.has(nome) ? "checked" : ""}>
             ${esc(nome)}
           </label>
         `).join("")}
@@ -8573,8 +8582,12 @@ function renderRadunoImportaScegliScheda(content) {
   };
   content.querySelectorAll("[data-scelta-foglio]").forEach(chk => {
     chk.addEventListener("change", () => {
-      if (chk.checked) bozza.scelte.add(chk.dataset.sceltaFoglio);
-      else bozza.scelte.delete(chk.dataset.sceltaFoglio);
+      if (chk.checked) {
+        if (singola) bozza.scelte.clear();
+        bozza.scelte.add(chk.dataset.sceltaFoglio);
+      } else {
+        bozza.scelte.delete(chk.dataset.sceltaFoglio);
+      }
       aggiornaBottoneContinua();
     });
   });
