@@ -1280,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:20</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:35</div>
         </div>
       </div>
     </header>
@@ -8646,7 +8646,10 @@ function renderRadunoImporta(content) {
 
   bozza.schede.forEach((s, si) => {
     const btn = document.getElementById(`btn-conferma-import-${si}`);
-    if (btn) btn.onclick = () => confermaImportScheda(si);
+    if (btn) btn.onclick = () => {
+      const chkSostituisci = document.getElementById(`import-sostituisci-rosa-${si}`);
+      confermaImportScheda(si, !!(chkSostituisci && chkSostituisci.checked));
+    };
     const btnIgnora = document.getElementById(`btn-ignora-import-${si}`);
     if (btnIgnora) btnIgnora.onclick = () => {
       bozza.schede.splice(si, 1);
@@ -8701,6 +8704,12 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
           ${rep.candidati.map((c, cIdx) => radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions, targetRaduno)).join("")}
         </div>
       `).join("")}
+      ${targetRaduno && (targetRaduno.rosa || []).length ? `
+        <label style="display:flex; align-items:flex-start; gap:6px; margin:10px 0; font-size:12.5px; cursor:pointer;">
+          <input type="checkbox" id="import-sostituisci-rosa-${si}" style="margin-top:3px;">
+          <span>Sostituisci completamente la rosa del raduno: toglie prima TUTTI i giocatori già presenti in "${esc(targetRaduno.nome)}" (${(targetRaduno.rosa || []).length} attualmente), poi importa solo questa scheda — utile per non lasciare rimasugli di import precedenti (es. giocatori di un altro torneo/foglio rimasti da un test). Se lasci deselezionato, questa scheda si aggiunge/aggiorna sopra a quello che c'è già.</span>
+        </label>
+      ` : ""}
       <div class="import-actions">
         <button class="btn btn-primary btn-sm" id="btn-conferma-import-${si}">Conferma import di questa scheda</button>
         <button class="btn btn-ghost btn-sm" id="btn-ignora-import-${si}">Ignora questa scheda</button>
@@ -8733,11 +8742,20 @@ function radunoCandidatoRigaHTML(c, si, repI, cIdx, repartiOptions, targetRaduno
   `;
 }
 
-function confermaImportScheda(si) {
+function confermaImportScheda(si, sostituisciRosa) {
   const bozza = radunoImportBozza;
   const s = bozza.schede[si];
 
   let raduno = bozza.targetId ? raduni.find(x => x.id === bozza.targetId) : null;
+  // "Sostituisci rosa": svuota il raduno esistente prima di importare, così
+  // eventuali giocatori rimasti da import precedenti (es. da un altro
+  // foglio/torneo provato per errore) non restano mescolati con quelli di
+  // questa scheda — il file Excel diventa davvero l'unica fonte di verità
+  // per la rosa, non solo per i giocatori che già coincidevano.
+  if (raduno && sostituisciRosa) {
+    raduno.rosa = [];
+    raduno.repartiPersonalizzati = [];
+  }
   if (!raduno) {
     raduno = {
       id: uid(), nome: s.nome, luogo: s.luogo || "", dataInizio: "", dataFine: "",
@@ -8805,7 +8823,7 @@ function confermaImportScheda(si) {
 
   bozza.schede.splice(si, 1);
   savePlayers();
-  let messaggio = `Importato nel raduno "${raduno.nome}": ${aggiunti} giocatori aggiunti, ${aggiornati} già presenti aggiornati (reparto/stato) (${nuoviGiocatori} nuove schede create in Elenco — ricordati di completarle con data di nascita e gli altri dati mancanti).`;
+  let messaggio = `Importato nel raduno "${raduno.nome}"${sostituisciRosa ? " (rosa sostituita completamente)" : ""}: ${aggiunti} giocatori aggiunti, ${aggiornati} già presenti aggiornati (reparto/stato) (${nuoviGiocatori} nuove schede create in Elenco — ricordati di completarle con data di nascita e gli altri dati mancanti).`;
   if (coloriNonRiconosciuti.length) {
     messaggio += `\n\nAttenzione: il colore della cella non è stato riconosciuto per ${coloriNonRiconosciuti.length} giocatori (sono comunque stati importati, ma senza stato assegnato):\n${coloriNonRiconosciuti.join("\n")}`;
   }
