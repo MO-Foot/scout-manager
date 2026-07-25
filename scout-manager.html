@@ -1280,7 +1280,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/07/2026 · 22:35</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 25/07/2026 · 10:20</div>
         </div>
       </div>
     </header>
@@ -4151,7 +4151,7 @@ function creaRigaParametroValutazione(nome, valore) {
   div.className = "qg-parametro-row";
   div.innerHTML = `
     <input type="text" class="qg-param-nome" list="parametri-datalist" placeholder="Parametro (es. Tecnica)" value="${esc(nome || "")}">
-    <input type="number" class="qg-param-voto" min="0" max="10" step="0.1" placeholder="Voto" value="${valore !== undefined && valore !== null && valore !== "" ? esc(valore) : ""}">
+    <input type="text" inputmode="decimal" class="qg-param-voto" placeholder="Voto (numero o lettera, es. 3.5 o A)" value="${valore !== undefined && valore !== null && valore !== "" ? esc(valore) : ""}">
     <button type="button" class="btn-remove-row" title="Rimuovi parametro">✕</button>
   `;
   div.querySelector(".btn-remove-row").onclick = () => div.remove();
@@ -5347,13 +5347,21 @@ function parseCandidati(text, nomeFile) {
   const jerseyRe = /^\d{1,2}$/;
   const ratingRe = /^\d[.,]\d{1,2}$/;
   const dateRe = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})$/;
-  const RATING_LABELS = ["Tecnica", "Intelligenza", "Personalità", "Speed", "Media Tips", "Voto extra", "Nota"];
+  const RATING_LABELS = ["Tecnica", "Intelligenza", "Personalità", "Speed", "Media Tips", "Voto extra", "Nota partita"];
 
   // Pattern condivisi tra le lingue viste finora nei report ClubCorner/ASF
   // (italiano "Impiego Scouting", francese "Engagement Scouting", tedesco
   // "Scouting-Bericht").
   const TEAM_HEADER_RE = /^(?:Lista dei giocatori|Liste des joueurs|Spielerliste)\s+(.+)$/i;
   const COMMENTO_RE = /^(?:Commento|Commentaire|Kommentar)$/i;
+  // Intestazione del blocco "Valutazione del potenziale" (lettera + domande
+  // con casella di spunta) che precede il vero commento in alcuni formati.
+  // Finora osservata in italiano ("Valutazione del potenziale") e in
+  // tedesco ("Potential Beurteilung", report SFV "Scouting-Bericht
+  // (Spiel)"); aggiunta anche una resa francese plausibile per coerenza
+  // con le altre lingue già gestite, anche se non ancora vista in un file
+  // reale.
+  const BLOCCO_POTENZIALE_RE = /^(?:Valutazione del potenziale|Potential Beurteilung|Évaluation du potentiel)$/i;
 
   // Righe "arredo" che si ripetono a ogni pagina (intestazione tabella,
   // piè di pagina): le togliamo subito, altrimenti un giocatore il cui
@@ -5480,8 +5488,11 @@ function parseCandidati(text, nomeFile) {
       // Salta interamente il blocco "Valutazione del potenziale" (lettera
       // ripetuta + domande con casella di spunta): su richiesta, non
       // importiamo le risposte alle domande perché il visto (☐/☒) non
-      // sempre viene esportato correttamente da ClubCorner.
-      if (i < lines.length && /^Valutazione del potenziale$/i.test(lines[i])) {
+      // sempre viene esportato correttamente da ClubCorner/SFV. La lettera
+      // stessa (potenzialeGrade, già letta sopra) diventa invece un voto
+      // strutturato a sé — vedi "Potenziale" più sotto — non più infilata
+      // a forza dentro il commento libero.
+      if (i < lines.length && BLOCCO_POTENZIALE_RE.test(lines[i])) {
         i++;
         if (i < lines.length && GRADE_RE.test(lines[i])) i++;
         while (i < lines.length && !COMMENTO_RE.test(lines[i]) && !idRe.test(lines[i]) && !TEAM_HEADER_RE.test(lines[i])) {
@@ -5499,11 +5510,11 @@ function parseCandidati(text, nomeFile) {
         commento = paragrafo.join(" ").trim();
       }
 
-      if (potenzialeGrade) {
-        commento = `Potenziale: ${potenzialeGrade}.${commento ? " " + commento : ""}`;
-      }
-
-      if (valori.length > 0 && commento) {
+      // Un candidato è valido se ha almeno un voto numerico o un voto sul
+      // potenziale, insieme a un commento scritto (narrativo) o comunque al
+      // voto sul potenziale stesso (che da solo è già un'informazione utile,
+      // anche senza commento libero).
+      if (valori.length > 0 && (commento || potenzialeGrade)) {
         const nomeCompleto = nomeParti.join(" ").trim();
         const { cognome, nome } = splitNomeCognome(nomeCompleto);
         // Con un solo voto compilato, nei report "a torneo" corrisponde alla
@@ -5512,8 +5523,12 @@ function parseCandidati(text, nomeFile) {
         // colonne intermedie, ma il caso più comune è "solo Nota" oppure
         // "tutte e 4/5 le colonne Tips".
         const parametri = valori.length === 1
-          ? [{ label: "Nota", valore: valori[0] }]
+          ? [{ label: "Nota partita", valore: valori[0] }]
           : valori.map((v, idx) => ({ label: RATING_LABELS[idx] || `Voto ${idx + 1}`, valore: v }));
+        // Voto sul potenziale (lettera, es. "A"/"B+"): campo strutturato a
+        // parte, così compare come voto "Potenziale" sulla scheda invece che
+        // come testo fisso davanti al commento.
+        if (potenzialeGrade) parametri.push({ label: "Potenziale", valore: potenzialeGrade });
         candidates.push({
           passaporto,
           cognome, nome,
@@ -5542,7 +5557,7 @@ function creaRigaParametro(p) {
   div.className = "dyn-row param-row";
   div.innerHTML = `
     <input type="text" class="p-label" placeholder="Parametro (es. T)" value="${esc(p.label)}">
-    <input type="number" step="0.1" class="p-valore" placeholder="Voto" value="${esc(p.valore)}">
+    <input type="text" inputmode="decimal" class="p-valore" placeholder="Voto (numero o lettera, es. 3.5 o A)" value="${esc(p.valore)}">
     <button type="button" class="btn-remove-row" title="Rimuovi voto">✕</button>
   `;
   div.querySelector(".btn-remove-row").onclick = () => div.remove();
@@ -5581,7 +5596,7 @@ function renderImport(content) {
       <h2>Importa relazioni</h2>
       <div class="import-subsection">
         <h3>Importa relazione</h3>
-        <p class="muted">Carica uno o più file: report PDF ClubCorner, relazione Word (.docx — sia il formato libero a paragrafi, sia il modello tabellare), il file Excel del test Mirwald, il file Excel "Presenze partite" (aggiornamento presenze/gol dal MatchCenter), oppure i report prestazioni GPS del preparatore atletico (dashboard Power BI per i giocatori di movimento, report Catapult per i portieri). L'app riconosce da sola il tipo di ogni file; se uno non è leggibile te lo segnalo invece di ignorarlo in silenzio.</p>
+        <p class="muted">Carica uno o più file: report PDF ClubCorner (italiano/francese) o Scouting-Bericht SFV/ASF in tedesco ("Scouting-Bericht (Spiel)"), relazione Word (.docx — sia il formato libero a paragrafi, sia il modello tabellare), il file Excel del test Mirwald, il file Excel "Presenze partite" (aggiornamento presenze/gol dal MatchCenter), oppure i report prestazioni GPS del preparatore atletico (dashboard Power BI per i giocatori di movimento, report Catapult per i portieri). Dai PDF di valutazione partita vengono presi i voti T/I/P/S, la media, il voto sul rendimento (B.E.), il voto partita, il voto sul potenziale (lettera) e il commento scritto vero e proprio — non le domande a crocette sul potenziale, che restano solo nel PDF originale. L'app riconosce da sola il tipo di ogni file; se uno non è leggibile te lo segnalo invece di ignorarlo in silenzio.</p>
         <div class="import-controls">
           <label class="docx-scout-label">Scout per questo caricamento <span class="muted" style="font-weight:400;">(usato per PDF e Word, se il file stesso non lo specifica)</span>
             <input type="text" id="import-scout-default" list="scout-datalist" placeholder="Nome dello scout">
