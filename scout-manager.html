@@ -291,6 +291,18 @@ body{
   color: var(--gold);
   border: 1px solid var(--gold-dim);
 }
+.categoria-badge{
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--surface-2);
+  color: var(--info);
+  border: 1px solid var(--info);
+  font-weight: 600;
+}
+.chip-categoria{ border-color: var(--info); color: var(--info); }
+.chip-categoria.chip-active{ background: var(--info); border-color: var(--info); color: #0a1b26; }
 .scout-tag{
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1280,7 +1292,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 25/07/2026 · 10:20</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 27/07/2026 · 12:15</div>
         </div>
       </div>
     </header>
@@ -3127,6 +3139,7 @@ function renderElenco(content) {
       <details class="filtro-dropdown">
         <summary>Etichetta${filtroEtichette.size ? ` (${filtroEtichette.size})` : ""}</summary>
         <div class="chips-group" id="chips-etichette">
+          ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
           ${etichetteTutte.map(e => `<button type="button" class="chip ${filtroEtichette.has(e) ? "chip-active" : ""}" data-val="${esc(e)}">${esc(e)}</button>`).join("")}
         </div>
       </details>
@@ -3212,7 +3225,11 @@ function renderRisultati() {
     if (filtroCategoria !== "tutte" && !(p.categorie || []).includes(filtroCategoria)) return false;
     if (filtroRuolo !== "tutti" && p.ruoloPrimario !== filtroRuolo && p.ruoloSecondario !== filtroRuolo) return false;
     if (filtroEtichette.size > 0) {
-      const etichetteGiocatore = p.etichette || [];
+      // Il filtro "Etichetta" copre sia le etichette libere sia le
+      // categorie fisse (U15, U16, ... Prima Squadra), che nel chips-group
+      // compaiono insieme: un giocatore basta che abbia una corrispondenza
+      // in uno dei due elenchi.
+      const etichetteGiocatore = [...(p.etichette || []), ...(p.categorie || [])];
       if (!etichetteGiocatore.some(e => filtroEtichette.has(e))) return false;
     }
     if (filtroScouts.size > 0) {
@@ -3333,7 +3350,7 @@ function renderRisultati() {
 }
 
 function tabellaRigaHTML(p, scoutFilter) {
-  const etichette = p.etichette || [];
+  const etichette = tagsVisualizzate(p);
   const media = valutazioneMedia(p, scoutFilter);
   return `
     <tr data-id="${p.id}">
@@ -3350,11 +3367,24 @@ function tabellaRigaHTML(p, scoutFilter) {
       <td class="mono">${(p.etaBiologica !== undefined && p.etaBiologica !== null && p.etaBiologica !== "") ? esc(p.etaBiologica) : "-"}</td>
       <td>${esc(p.ruoloPrimario || "-")}</td>
       <td>${p.squadra || (p.categorie && p.categorie.length) ? squadraConCategorie(p) : "-"}</td>
-      <td>${etichette.length ? etichette.map(e => `<span class="etichetta-badge">${esc(e)}</span>`).join(" ") : "-"}</td>
+      <td>${etichette.length ? etichette.join(" ") : "-"}</td>
       ${ordinamento === "modificati" ? `<td class="mono">${formatDataIt(p.modificatoIl || p.creatoIl)}${(p.ultimeSezioniModificate && p.ultimeSezioniModificate.length) ? `<br><span class="muted" style="font-size:11px;">${esc(p.ultimeSezioniModificate.join(", "))}</span>` : ""}</td>` : ""}
       ${ordinamento === "ultimaPartita" ? `<td class="${(() => { const g = giorniDaOggi(dataUltimaPartita(p)); return g !== null && g >= 0 && g <= 6 ? "ultima-partita-recente" : ""; })()}">${esc(testoUltimaPartita(p))}</td>` : ""}
     </tr>
   `;
+}
+
+// Elenco combinato di badge da mostrare ovunque comparivano le sole
+// "Etichette": le categorie fisse (U15, U16, ... Prima Squadra) assegnate
+// al giocatore compaiono per prime, con uno stile leggermente diverso
+// (categoria-badge) per restare distinguibili dalle etichette libere, ma
+// visivamente "tra le etichette" come richiesto — e sono già coperte dallo
+// stesso filtro multi-selezione (vedi filtroEtichette più sopra).
+function tagsVisualizzate(p) {
+  return [
+    ...(p.categorie || []).map(c => `<span class="etichetta-badge categoria-badge">${esc(c)}</span>`),
+    ...(p.etichette || []).map(e => `<span class="etichetta-badge">${esc(e)}</span>`)
+  ];
 }
 
 function apriFotoIngrandita(url) {
@@ -3386,7 +3416,7 @@ function cardHTML(p, scoutFilter) {
   const media = valutazioneMedia(p, scoutFilter);
   const eta = calcolaEta(p.dataNascita);
   const noteSnippet = (p.note || "").slice(0, 90);
-  const etichette = p.etichette || [];
+  const etichette = tagsVisualizzate(p);
   return `
     <div class="player-card ${isNazionaleU16Corrente(p) ? "player-card-nazionale-u16" : isFCLuganoU15(p) ? "player-card-lugano-u15" : isFOOTURO(p) ? "player-card-footuro" : ""}" data-id="${p.id}">
       <div class="card-badge ${ratingClass(media)}">${media !== null ? media.toFixed(1) : "-"}</div>
@@ -3409,7 +3439,7 @@ function cardHTML(p, scoutFilter) {
         ${p.ruoloPrimario ? `<span class="tag tag-primario">${esc(p.ruoloPrimario)}</span>` : ""}
         ${p.ruoloSecondario ? `<span class="tag tag-secondario">${esc(p.ruoloSecondario)}</span>` : ""}
       </div>
-      ${etichette.length ? `<div class="card-etichette">${etichette.map(e => `<span class="etichetta-badge">${esc(e)}</span>`).join("")}</div>` : ""}
+      ${etichette.length ? `<div class="card-etichette">${etichette.join("")}</div>` : ""}
       ${noteSnippet ? `<div class="card-note">${esc(noteSnippet)}${(p.note || "").length > 90 ? "…" : ""}</div>` : ""}
     </div>
   `;
@@ -3724,7 +3754,7 @@ function apriDettaglio(id) {
   const root = document.getElementById("modal-root");
   const media = valutazioneMedia(p, filtroScouts);
   const eta = calcolaEta(p.dataNascita);
-  const etichette = p.etichette || [];
+  const etichette = tagsVisualizzate(p);
 
   function scoutPerVisionatura(v) {
     if (v.scout) return v.scout;
@@ -3836,7 +3866,7 @@ function apriDettaglio(id) {
               ${p.piedePreferito ? `<span class="tag">Piede: ${esc(p.piedePreferito)}</span>` : ""}
               ${p.nazionalita ? `<span class="tag">${p.nazionalita === "CH" ? "🇨🇭 CH" : `🇨🇭 CH + ${esc(p.nazionalita)}`}</span>` : ""}
             </div>
-            ${etichette.length ? `<div class="card-etichette">${etichette.map(e => `<span class="etichetta-badge">${esc(e)}</span>`).join("")}</div>` : ""}
+            ${etichette.length ? `<div class="card-etichette">${etichette.join("")}</div>` : ""}
           </div>
           <div class="card-badge large ${ratingClass(media)}">${media !== null ? media.toFixed(1) : "-"}</div>
           <div class="modal-radar">${radarChartSVG(medieTips(p, filtroScouts), { size: 108, showLabels: true })}</div>
