@@ -492,6 +492,25 @@ body{
 .tabella-giocatori tr[data-id]{ cursor: pointer; }
 .tabella-giocatori tr[data-id]:hover td{ background: var(--surface-2); }
 .tabella-giocatori .etichetta-badge{ margin: 2px 3px 2px 0; display: inline-block; }
+
+.presenze-lista{ display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.presenze-settimana{
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden;
+}
+.presenze-settimana[open]{ border-color: var(--gold-dim); }
+.presenze-settimana summary{
+  list-style: none; cursor: pointer; padding: 14px 18px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.presenze-settimana summary::-webkit-details-marker{ display: none; }
+.presenze-settimana summary:hover{ background: var(--surface-2); }
+.presenze-settimana-titolo{ display: flex; flex-direction: column; gap: 2px; }
+.presenze-settimana-titolo strong{ font-family: var(--font-display); font-size: 17px; letter-spacing: 0.02em; }
+.presenze-chevron{ color: var(--muted); font-size: 12px; transition: transform .15s ease; flex: 0 0 auto; }
+.presenze-settimana[open] .presenze-chevron{ transform: rotate(90deg); }
+.presenze-settimana-body{ padding: 0 18px 16px; }
+.tabella-presenze{ margin-top: 4px; }
 .tabella-foto{
   width: 36px; height: 36px;
   border-radius: 50%;
@@ -1292,7 +1311,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 27/07/2026 · 12:15</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 27/07/2026 · 18:40</div>
         </div>
       </div>
     </header>
@@ -1303,6 +1322,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       <button class="navtab" id="nav-calendario" type="button">Calendario</button>
       <button class="navtab" id="nav-raduni" type="button">Raduni U16</button>
       <button class="navtab" id="nav-allenatori" type="button">Allenatori</button>
+      <button class="navtab" id="nav-presenze" type="button">Presenze</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
     </nav>
 
@@ -1497,6 +1517,10 @@ let vistaElenco = "schede";
 let giocatoriFiltratiCorrente = [];
 let filtroEtichette = new Set();
 let filtroScouts = new Set();
+
+let filtroPresenzeTesto = "";
+let filtroPresenzeCompetizione = "tutte";
+let settimanaApertaPresenze = null;
 
 /* ===================== Utility ===================== */
 function esc(str) {
@@ -2923,6 +2947,7 @@ async function boot() {
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
   document.getElementById("nav-allenatori").onclick = () => switchTab("allenatori");
+  document.getElementById("nav-presenze").onclick = () => switchTab("presenze");
   document.getElementById("nav-strumenti").onclick = () => switchTab("strumenti");
 
   logoPersonalizzato = await idbGet("logo-personalizzato").catch(() => "") || "";
@@ -3061,6 +3086,7 @@ function render(editPlayer) {
   else if (currentTab === "calendario") renderCalendario(content);
   else if (currentTab === "raduni") renderRaduni(content);
   else if (currentTab === "allenatori") renderAllenatori(content);
+  else if (currentTab === "presenze") renderPresenze(content);
   else if (currentTab === "strumenti") renderStrumenti(content);
 
   window.scrollTo(0, scrollDaMantenere);
@@ -6429,6 +6455,130 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
 
   players = players.filter(p => p.id === idPrincipale || !idsSecondari.includes(p.id));
   savePlayers();
+}
+
+/* ===================== PRESENZE ===================== */
+function lunediSettimanaDi(iso) {
+  const d = new Date(iso + "T00:00:00");
+  const giorno = d.getDay(); // 0=Dom, 1=Lun, ...
+  const offset = giorno === 0 ? -6 : 1 - giorno;
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+function domenicaSettimanaDi(lunedi) {
+  const d = new Date(lunedi);
+  d.setDate(d.getDate() + 6);
+  return d;
+}
+function isoLocale(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function formatRangeSettimana(lun, dom) {
+  const stessoMese = lun.getMonth() === dom.getMonth();
+  const lunTxt = lun.toLocaleDateString("it-IT", stessoMese ? { day: "2-digit" } : { day: "2-digit", month: "long" });
+  const domTxt = dom.toLocaleDateString("it-IT", { day: "2-digit", month: "long" });
+  return `${lunTxt} – ${domTxt} ${dom.getFullYear()}`;
+}
+
+function renderPresenze(content) {
+  const righe = [];
+  players.forEach(p => {
+    (p.partiteUfficiali || []).forEach(m => {
+      if (m.data) righe.push({ player: p, m });
+    });
+  });
+
+  const competizioniTutte = [...new Set(righe.map(r => r.m.competizione).filter(Boolean))].sort();
+
+  const testoFiltro = filtroPresenzeTesto.trim().toLowerCase();
+  const righeFiltrate = righe.filter(r => {
+    if (filtroPresenzeCompetizione !== "tutte" && (r.m.competizione || "") !== filtroPresenzeCompetizione) return false;
+    if (testoFiltro) {
+      const haystack = [r.player.cognome, r.player.nome, r.m.squadra, r.m.avversario].filter(Boolean).join(" ").toLowerCase();
+      if (!haystack.includes(testoFiltro)) return false;
+    }
+    return true;
+  });
+
+  const settimaneMap = new Map();
+  righeFiltrate.forEach(r => {
+    const lun = lunediSettimanaDi(r.m.data);
+    const key = isoLocale(lun);
+    if (!settimaneMap.has(key)) settimaneMap.set(key, { lunedi: lun, domenica: domenicaSettimanaDi(lun), righe: [] });
+    settimaneMap.get(key).righe.push(r);
+  });
+  const settimaneOrdinate = [...settimaneMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+
+  if ((settimanaApertaPresenze === null || !settimaneMap.has(settimanaApertaPresenze)) && settimaneOrdinate.length) {
+    settimanaApertaPresenze = settimaneOrdinate[0][0];
+  }
+
+  const PRESENZA_CLASSE = { "Titolare": "rating-good", "Subentrato": "rating-mid", "Panchina (non entrato)": "rating-na", "Non convocato": "rating-low" };
+
+  const settimaneHTML = settimaneOrdinate.map(([key, sett]) => {
+    const righeOrdinate = sett.righe.slice().sort((a, b) =>
+      (b.m.data || "").localeCompare(a.m.data || "") || (a.player.cognome || "").localeCompare(b.player.cognome || ""));
+    const giocatoriCoinvolti = new Set(sett.righe.map(r => r.player.id)).size;
+    const competizioniSettimana = [...new Set(sett.righe.map(r => r.m.competizione).filter(Boolean))];
+    const aperta = settimanaApertaPresenze === key;
+
+    const righeTr = righeOrdinate.map(({ player: p, m }) => `
+      <tr data-id="${esc(p.id)}">
+        <td>
+          <div>${esc(p.cognome)} ${esc(p.nome)}</div>
+          <div class="muted" style="font-size:12px;">${esc(m.squadra || p.squadra || "-")}</div>
+        </td>
+        <td>
+          ${esc(m.squadra || "?")} vs ${esc(m.avversario || "?")}${m.risultato ? ` (${esc(m.risultato)})` : ""}
+          <div class="muted" style="font-size:12px;">${formatDataIt(m.data)}${m.competizione ? " · " + esc(m.competizione) : ""}</div>
+        </td>
+        <td>
+          ${m.presenza ? `<span class="${PRESENZA_CLASSE[m.presenza] || ""}">${esc(m.presenza)}</span>` : "-"}
+          ${m.note ? `<div class="muted" style="font-size:12px; margin-top:2px;">${esc(m.note)}</div>` : ""}
+        </td>
+        <td class="mono">${(m.minutiGiocati !== null && m.minutiGiocati !== undefined && m.minutiGiocati !== "") ? esc(m.minutiGiocati) + "'" : "-"}</td>
+        <td class="mono">${m.gol ? esc(m.gol) : "-"}</td>
+      </tr>`).join("");
+
+    return `
+      <details class="presenze-settimana" data-key="${esc(key)}" ${aperta ? "open" : ""}>
+        <summary>
+          <div class="presenze-settimana-titolo">
+            <strong>Settimana ${formatRangeSettimana(sett.lunedi, sett.domenica)}</strong>
+            <span class="muted" style="font-size:12.5px;">${giocatoriCoinvolti} giocator${giocatoriCoinvolti === 1 ? "e coinvolto" : "i coinvolti"}${competizioniSettimana.length ? " — " + competizioniSettimana.map(c => esc(c)).join(", ") : ""}</span>
+          </div>
+          <span class="presenze-chevron">▶</span>
+        </summary>
+        <div class="presenze-settimana-body">
+          <table class="tabella-giocatori tabella-presenze">
+            <thead><tr><th>Giocatore</th><th>Partita</th><th>Esito</th><th>Min.</th><th>Gol</th></tr></thead>
+            <tbody>${righeTr}</tbody>
+          </table>
+        </div>
+      </details>`;
+  }).join("") || `<div class="muted" style="padding:20px 4px;">Nessuna partita ufficiale registrata${(testoFiltro || filtroPresenzeCompetizione !== "tutte") ? " con questi filtri" : " ancora"}. Le partite si aggiungono dalla scheda di ogni giocatore, sezione "Partite".</div>`;
+
+  content.innerHTML = `
+    <div class="filtri-bar" id="filtri-bar-presenze">
+      <input type="text" id="fp-testo" class="f-input f-testo" placeholder="Cerca giocatore o squadra..." value="${esc(filtroPresenzeTesto)}">
+      <select id="fp-competizione" class="f-input">
+        <option value="tutte">Tutte le competizioni</option>
+        ${competizioniTutte.map(c => `<option value="${esc(c)}" ${filtroPresenzeCompetizione === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="presenze-lista">${settimaneHTML}</div>
+  `;
+
+  document.getElementById("fp-testo").oninput = e => { filtroPresenzeTesto = e.target.value; renderPresenze(content); };
+  document.getElementById("fp-competizione").onchange = e => { filtroPresenzeCompetizione = e.target.value; renderPresenze(content); };
+
+  content.querySelectorAll(".presenze-settimana").forEach(det => {
+    det.addEventListener("toggle", () => { if (det.open) settimanaApertaPresenze = det.dataset.key; });
+  });
+
+  content.querySelectorAll(".tabella-presenze tr[data-id]").forEach(tr => {
+    tr.onclick = () => apriDettaglio(tr.dataset.id);
+  });
 }
 
 function renderStrumenti(content) {
