@@ -1311,7 +1311,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 09:30</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 10:05</div>
         </div>
       </div>
     </header>
@@ -3912,7 +3912,8 @@ function apriDettaglio(id) {
             <h3>Allenatore</h3>
             <div class="candidato-card-header" style="align-items:center;">
               <span class="rd-apri-allenatore" data-allenatore-id="${esc(a.id)}" style="cursor:pointer; font-weight:600;">${esc(a.nome)}</span>
-              <span class="chip" style="font-size:10.5px;">${info.automatico ? (a.categoria ? "Automatico (per squadra e categoria)" : "Automatico (per squadra)") : "Assegnato a mano"}</span>
+              <span class="chip" style="font-size:10.5px;">${info.automatico ? (info.stimatoPerEta ? "Stimato per età — non confermato" : a.categoria ? "Automatico (per squadra e categoria)" : "Automatico (per squadra)") : "Assegnato a mano"}</span>
+              ${info.stimatoPerEta ? `<p class="muted" style="font-size:11.5px; margin-top:4px;">Il giocatore non ha una Categoria assegnata a mano: questo collegamento è stimato dalla sua età, non confermato. Se gioca in una categoria diversa dalla sua età (es. "gioca su"), assegna la Categoria giusta nella sua scheda o scegli l'allenatore a mano qui sotto.</p>` : ""}
             </div>
             <div class="allenatore-contatti" style="margin-top:6px;">
               ${a.telefono ? `<a class="btn btn-ghost btn-sm" href="tel:${esc(a.telefono.replace(/\s+/g, ""))}">📞 ${esc(a.telefono)}</a>` : ""}
@@ -9237,25 +9238,48 @@ function trovaAllenatoriPerSquadra(nomeSquadra) {
 // campo "categoria" dell'allenatore viene incrociato con le Categorie
 // assegnate al giocatore per scegliere quello giusto — stesso principio già
 // usato per collegare i giocatori a una squadra+categoria altrove
-// nell'app (vedi trovaGiocatoriPerSquadraECategoria). Se dopo questo
-// filtro resta più di un candidato (es. giocatore senza categoria
-// assegnata, o allenatori senza categoria impostata), resta ambiguo.
-// candidati è popolato anche quando ambiguo così chi mostra il risultato
-// può segnalarlo invece di indovinare quale usare.
+// nell'app (vedi trovaGiocatoriPerSquadraECategoria). ATTENZIONE: la
+// "Categoria" mostrata in cima alla scheda giocatore (accanto all'età) è
+// un'altra cosa — è categoriaNazionale(dataNascita), la fascia d'età
+// Nazionale calcolata dalla data di nascita, NON il campo "Categorie"
+// scelto a mano nella scheda (quello usato qui). Un giocatore può avere
+// "Categoria U16" per età ma nessuna Categoria U16 assegnata a mano (es.
+// perché gioca in una squadra di categoria superiore, o perché non è
+// ancora stato taggato) — sono volutamente tenuti separati per non forzare
+// un'etichetta sbagliata su chi "gioca su" rispetto alla sua età. Se dopo
+// il filtro per Categorie assegnate resta più di un candidato E il
+// giocatore non ha NESSUNA categoria assegnata a mano, si tenta un secondo
+// giro con la sola età (stessa logica, meno affidabile: un giocatore che
+// gioca fuori dalla sua fascia d'età risulterebbe collegato all'allenatore
+// sbagliato) — in quel caso il risultato è marcato "stimato" così chi lo
+// vede sa che non è confermato e può correggerlo a mano. Se dopo questo
+// filtro resta più di un candidato (es. allenatori senza categoria
+// impostata), resta ambiguo. candidati è popolato anche quando ambiguo
+// così chi mostra il risultato può segnalarlo invece di indovinare quale
+// usare.
 function allenatoreDelGiocatore(p) {
   if (p.allenatoreIdManuale) {
     const a = allenatori.find(x => x.id === p.allenatoreIdManuale);
     if (a) return { allenatore: a, automatico: false, ambiguo: false, candidati: [a] };
   }
   let candidati = trovaAllenatoriPerSquadra(p.squadra);
+  let stimatoPerEta = false;
   if (candidati.length > 1) {
     const categorieGiocatore = p.categorie || [];
-    const perCategoria = candidati.filter(a => a.categoria && categorieGiocatore.includes(a.categoria));
-    if (perCategoria.length === 1) candidati = perCategoria;
+    if (categorieGiocatore.length) {
+      const perCategoria = candidati.filter(a => a.categoria && categorieGiocatore.includes(a.categoria));
+      if (perCategoria.length === 1) candidati = perCategoria;
+    } else {
+      const catEta = categoriaNazionale(p.dataNascita);
+      if (catEta) {
+        const perEta = candidati.filter(a => a.categoria === catEta);
+        if (perEta.length === 1) { candidati = perEta; stimatoPerEta = true; }
+      }
+    }
   }
-  if (candidati.length === 1) return { allenatore: candidati[0], automatico: true, ambiguo: false, candidati };
-  if (candidati.length > 1) return { allenatore: null, automatico: true, ambiguo: true, candidati };
-  return { allenatore: null, automatico: true, ambiguo: false, candidati: [] };
+  if (candidati.length === 1) return { allenatore: candidati[0], automatico: true, ambiguo: false, stimatoPerEta, candidati };
+  if (candidati.length > 1) return { allenatore: null, automatico: true, ambiguo: true, stimatoPerEta: false, candidati };
+  return { allenatore: null, automatico: true, ambiguo: false, stimatoPerEta: false, candidati: [] };
 }
 
 function renderAllenatori(content) {
