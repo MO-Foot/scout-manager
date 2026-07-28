@@ -1311,7 +1311,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 27/07/2026 · 18:40</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 09:30</div>
         </div>
       </div>
     </header>
@@ -3912,7 +3912,7 @@ function apriDettaglio(id) {
             <h3>Allenatore</h3>
             <div class="candidato-card-header" style="align-items:center;">
               <span class="rd-apri-allenatore" data-allenatore-id="${esc(a.id)}" style="cursor:pointer; font-weight:600;">${esc(a.nome)}</span>
-              <span class="chip" style="font-size:10.5px;">${info.automatico ? "Automatico (per squadra)" : "Assegnato a mano"}</span>
+              <span class="chip" style="font-size:10.5px;">${info.automatico ? (a.categoria ? "Automatico (per squadra e categoria)" : "Automatico (per squadra)") : "Assegnato a mano"}</span>
             </div>
             <div class="allenatore-contatti" style="margin-top:6px;">
               ${a.telefono ? `<a class="btn btn-ghost btn-sm" href="tel:${esc(a.telefono.replace(/\s+/g, ""))}">📞 ${esc(a.telefono)}</a>` : ""}
@@ -9232,15 +9232,27 @@ function trovaAllenatoriPerSquadra(nomeSquadra) {
 
 // Risolve l'allenatore "giusto" per un giocatore: prima l'assegnazione
 // manuale (se impostata e ancora esistente), altrimenti il collegamento
-// automatico per squadra. candidati è popolato anche quando ambiguo (più
-// allenatori diversi risultano collegati alla stessa squadra) così chi
-// mostra il risultato può segnalarlo invece di indovinare quale usare.
+// automatico per squadra. Se lo stesso club ha più allenatori (uno per
+// categoria, es. Prima Squadra / U21 / U19 / U18 / U17 / U16 / U15), il
+// campo "categoria" dell'allenatore viene incrociato con le Categorie
+// assegnate al giocatore per scegliere quello giusto — stesso principio già
+// usato per collegare i giocatori a una squadra+categoria altrove
+// nell'app (vedi trovaGiocatoriPerSquadraECategoria). Se dopo questo
+// filtro resta più di un candidato (es. giocatore senza categoria
+// assegnata, o allenatori senza categoria impostata), resta ambiguo.
+// candidati è popolato anche quando ambiguo così chi mostra il risultato
+// può segnalarlo invece di indovinare quale usare.
 function allenatoreDelGiocatore(p) {
   if (p.allenatoreIdManuale) {
     const a = allenatori.find(x => x.id === p.allenatoreIdManuale);
     if (a) return { allenatore: a, automatico: false, ambiguo: false, candidati: [a] };
   }
-  const candidati = trovaAllenatoriPerSquadra(p.squadra);
+  let candidati = trovaAllenatoriPerSquadra(p.squadra);
+  if (candidati.length > 1) {
+    const categorieGiocatore = p.categorie || [];
+    const perCategoria = candidati.filter(a => a.categoria && categorieGiocatore.includes(a.categoria));
+    if (perCategoria.length === 1) candidati = perCategoria;
+  }
   if (candidati.length === 1) return { allenatore: candidati[0], automatico: true, ambiguo: false, candidati };
   if (candidati.length > 1) return { allenatore: null, automatico: true, ambiguo: true, candidati };
   return { allenatore: null, automatico: true, ambiguo: false, candidati: [] };
@@ -9303,6 +9315,7 @@ function allenatoreCardHTML(a) {
       <div class="candidato-card-header">
         <strong>${esc(a.nome || "Allenatore senza nome")}</strong>
         ${a.squadra ? `<span class="chip" style="margin-left:8px;">${esc(a.squadra)}</span>` : ""}
+        ${a.categoria ? `<span class="chip" style="margin-left:8px;">${esc(a.categoria)}</span>` : ""}
         <span class="chip" style="margin-left:8px;">${nGiocatori} giocator${nGiocatori === 1 ? "e" : "i"} collegat${nGiocatori === 1 ? "o" : "i"}</span>
         ${nOsservazioni ? `<span class="chip" style="margin-left:8px;">${nOsservazioni} osservazion${nOsservazioni === 1 ? "e" : "i"}</span>` : ""}
       </div>
@@ -9324,6 +9337,12 @@ function renderAllenatoreForm(content) {
         </label>
         <label>Squadra <span class="muted" style="font-weight:400;">(usata per il collegamento automatico ai giocatori)</span>
           <input type="text" id="al-squadra" list="squadre-datalist" value="${esc(a ? a.squadra : "")}">
+        </label>
+        <label>Categoria <span class="muted" style="font-weight:400;">(se il club ha più allenatori, serve a collegare quello giusto in base alla categoria del giocatore)</span>
+          <select id="al-categoria">
+            <option value="" ${!a || !a.categoria ? "selected" : ""}>— Nessuna (unico allenatore del club) —</option>
+            ${CATEGORIE_FISSE.map(c => `<option value="${esc(c)}" ${a && a.categoria === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          </select>
         </label>
         <label>Telefono
           <input type="tel" id="al-telefono" value="${esc(a ? a.telefono : "")}">
@@ -9385,6 +9404,7 @@ function salvaAllenatoreDaForm(vecchioAllenatore) {
     creatoIl: vecchioAllenatore ? vecchioAllenatore.creatoIl : new Date().toISOString(),
     nome,
     squadra: document.getElementById("al-squadra").value.trim(),
+    categoria: document.getElementById("al-categoria").value || null,
     telefono: document.getElementById("al-telefono").value.trim(),
     email: document.getElementById("al-email").value.trim(),
     osservazioni,
@@ -9438,7 +9458,7 @@ function renderAllenatoreDettaglio(content) {
           <button class="btn btn-ghost btn-sm" id="btn-torna-lista-allenatori">← Torna alla lista</button>
         </div>
       </div>
-      ${a.squadra ? `<p class="muted">${esc(a.squadra)}</p>` : ""}
+      ${a.squadra || a.categoria ? `<p class="muted">${esc(a.squadra || "")}${a.squadra && a.categoria ? " — " : ""}${esc(a.categoria || "")}</p>` : ""}
       <div class="allenatore-contatti">
         ${a.telefono ? `<a class="btn btn-ghost btn-sm" href="tel:${esc(a.telefono.replace(/\s+/g, ""))}">📞 ${esc(a.telefono)}</a>` : ""}
         ${a.email ? `<a class="btn btn-ghost btn-sm" href="mailto:${esc(a.email)}">✉️ ${esc(a.email)}</a>` : ""}
