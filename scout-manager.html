@@ -1311,7 +1311,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 10:10</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 10:18</div>
         </div>
       </div>
     </header>
@@ -3165,8 +3165,8 @@ function renderElenco(content) {
       <details class="filtro-dropdown">
         <summary>Etichetta${filtroEtichette.size ? ` (${filtroEtichette.size})` : ""}</summary>
         <div class="chips-group" id="chips-etichette">
-          ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
           ${etichetteTutte.map(e => `<button type="button" class="chip ${filtroEtichette.has(e) ? "chip-active" : ""}" data-val="${esc(e)}">${esc(e)}</button>`).join("")}
+          ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
         </div>
       </details>
       <details class="filtro-dropdown">
