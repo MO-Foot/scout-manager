@@ -303,6 +303,23 @@ body{
 }
 .chip-categoria{ border-color: var(--info); color: var(--info); }
 .chip-categoria.chip-active{ background: var(--info); border-color: var(--info); color: #0a1b26; }
+.carico-badge{
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+.star-rating{ display: inline-flex; gap: 2px; vertical-align: middle; }
+.star-rating .star{
+  font-size: 17px;
+  line-height: 1;
+  color: var(--line);
+}
+.star-rating .star.star-filled{ color: var(--gold); }
+.star-rating:not(.readonly) .star{ cursor: pointer; }
 .scout-tag{
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1040,6 +1057,12 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   margin-bottom: 14px;
   background: var(--bg-pitch);
 }
+.candidati-grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.candidati-grid .candidato-card{ margin-bottom: 0; }
 .cal-giocatori-collegati{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .candidato-card-header{
   display: flex;
@@ -1311,7 +1334,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 11:05</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 23:39</div>
         </div>
       </div>
     </header>
@@ -1322,6 +1345,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       <button class="navtab" id="nav-calendario" type="button">Calendario</button>
       <button class="navtab" id="nav-raduni" type="button">Raduni U16</button>
       <button class="navtab" id="nav-allenatori" type="button">Allenatori</button>
+      <button class="navtab" id="nav-esercizi" type="button">Eserciziario</button>
       <button class="navtab" id="nav-presenze" type="button">Presenze</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
     </nav>
@@ -1418,6 +1442,7 @@ let players = [];
 let eventi = [];
 let raduni = [];
 let allenatori = [];
+let esercizi = [];
 
 // Il file su Dropbox era storicamente un array nudo di giocatori. Poi è
 // diventato {players, eventi}, e ora contiene anche i raduni TYT, quindi il
@@ -1427,8 +1452,8 @@ let allenatori = [];
 function parseDatabaseJSON(text) {
   const parsed = text && text.trim() ? JSON.parse(text) : [];
   const risultato = Array.isArray(parsed)
-    ? { players: parsed, eventi: [], raduni: [], allenatori: [] }
-    : { players: parsed.players || [], eventi: parsed.eventi || [], raduni: parsed.raduni || [], allenatori: parsed.allenatori || [] };
+    ? { players: parsed, eventi: [], raduni: [], allenatori: [], esercizi: [] }
+    : { players: parsed.players || [], eventi: parsed.eventi || [], raduni: parsed.raduni || [], allenatori: parsed.allenatori || [], esercizi: parsed.esercizi || [] };
   migraTuttiSquadraCategorie(risultato.players);
   return risultato;
 }
@@ -1440,6 +1465,358 @@ function parseDatabaseJSON(text) {
 // nell'etichetta fissa corrispondente (es. "U21").
 const CATEGORIE_FISSE = ["U14", "U15", "U16", "U17", "U18", "U19", "U21", "Prima Squadra"];
 const CATEGORIA_NUMERO_A_LABEL = { "14": "U14", "15": "U15", "16": "U16", "17": "U17", "18": "U18", "19": "U19", "21": "U21" };
+
+// ===================== Eserciziario =====================
+// Un esercizio può appartenere a più di un macrocontenitore insieme (es. un
+// esercizio che lavora sia Attacco che Standards), quindi è salvato come
+// elenco (array), non come singolo valore — a differenza della categoria
+// fissa degli allenatori/giocatori qui sopra.
+const ESERCIZI_MACROCONTENITORI = ["Attacco", "Difesa", "Standards"];
+// "Carico" = intensità fisica dell'esercizio. Riusiamo le stesse classi CSS
+// rating-good/rating-mid/rating-low già usate altrove nell'app per i voti
+// (verde/oro/rosso), qui con un significato diverso: verde = carico basso,
+// rosso = carico alto.
+const CARICO_OPZIONI = [
+  { valore: "Basso", classe: "rating-good" },
+  { valore: "Medio", classe: "rating-mid" },
+  { valore: "Alto", classe: "rating-low" },
+];
+function caricoClasse(valore) {
+  const trovato = CARICO_OPZIONI.find(c => c.valore === valore);
+  return trovato ? trovato.classe : "";
+}
+// Stelline di gradimento (1-5), sola lettura — usata nelle card/dettaglio.
+// Per l'input cliccabile nel form vedi il markup con data-star in
+// renderEsercizioForm.
+function starsHTML(valore) {
+  const n = Math.max(0, Math.min(5, parseInt(valore, 10) || 0));
+  return `<span class="star-rating readonly" title="${n}/5">${[1, 2, 3, 4, 5].map(i => `<span class="star ${i <= n ? "star-filled" : ""}">★</span>`).join("")}</span>`;
+}
+
+// ===================== Allenamenti (dentro un Raduno) =====================
+// Ricalca la struttura della scheda Excel "Scheda allenamento" di Mo: una
+// sessione ha un'intestazione (data, categoria, MD rispetto alla partita di
+// riferimento...), un riepilogo "Players available" e "GPS parameters"
+// (per ora inseriti a mano, come da Excel), e uno o più blocchi esercizio —
+// ognuno opzionalmente collegato a una voce dell'Eserciziario, con
+// Training Load / Tempo / Dimensioni ed eventuale descrizione specifici di
+// QUESTA sessione (possono differire da un utilizzo all'altro dello stesso
+// esercizio). Il piazzamento colorato dei giocatori sul campetto mini di
+// ogni blocco (la "pagina 2" della scheda Excel) e l'import/export Excel
+// completo sono il prossimo incremento: il campo "posizionamento" di ogni
+// blocco è già riservato per quello, ma resta vuoto e non ha ancora UI.
+const PLAYERS_AVAILABLE_CAMPI = [
+  { chiave: "gk", label: "GK" },
+  { chiave: "fieldPlayers", label: "Field players" },
+  { chiave: "adapted", label: "Adapted" },
+  { chiave: "individual", label: "Individual" },
+  { chiave: "injured", label: "Injured" },
+  { chiave: "ill", label: "Ill" },
+  { chiave: "absent", label: "Absent" },
+  { chiave: "recovery", label: "Recovery" },
+];
+const GPS_CAMPI = [
+  { chiave: "minutes", label: "Minutes" },
+  { chiave: "totalDistance", label: "Total distance" },
+  { chiave: "hiDistance", label: "HI distance" },
+  { chiave: "sprintDistance", label: "Sprint distance" },
+  { chiave: "nSprints", label: "N Sprints" },
+  { chiave: "nHiAcc", label: "N HI ACC" },
+  { chiave: "nHiDec", label: "N HI DEC" },
+  { chiave: "hmld", label: "HMLD" },
+  { chiave: "maxSpeed", label: "Max Speed" },
+  { chiave: "rpe", label: "RPE" },
+];
+let allenamentiVista = "lista";
+let allenamentoCorrenteId = null;
+
+function renderRadunoAllenamenti(content) {
+  const r = raduni.find(x => x.id === radunoCorrenteId);
+  if (!r) { raduniSezione = "lista"; render(); return; }
+  r.allenamenti = r.allenamenti || [];
+  if (allenamentiVista === "form") { renderAllenamentoForm(content, r); return; }
+  renderAllenamentiLista(content, r);
+}
+
+function renderAllenamentiLista(content, r) {
+  const elenco = (r.allenamenti || []).slice().sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  content.innerHTML = `
+    <div class="import-box raduno-dettaglio-box">
+      <div class="candidato-card-header">
+        <h2 style="margin:0;">Allenamenti — ${esc(r.nome)}</h2>
+        <div class="import-actions">
+          <button class="btn btn-primary btn-sm" id="btn-nuovo-allenamento">+ Nuovo allenamento</button>
+          <button class="btn btn-ghost btn-sm" id="btn-torna-raduno-da-allenamenti">← Torna al raduno</button>
+        </div>
+      </div>
+      <p class="muted">Ogni allenamento ricalca la struttura della vostra scheda Excel: intestazione sessione, Players available, GPS parameters e i blocchi esercizio (collegabili a una voce dell'Eserciziario). Il piazzamento colorato dei giocatori sui campetti e l'import/export Excel completo arrivano nel prossimo passaggio.</p>
+      <div class="import-subsection">
+        ${elenco.length ? elenco.map(al => allenamentoCardHTML(al)).join("") : `<p class="muted">Nessun allenamento ancora registrato per questo raduno.</p>`}
+      </div>
+    </div>
+  `;
+  document.getElementById("btn-torna-raduno-da-allenamenti").onclick = () => { raduniSezione = "dettaglio"; render(); };
+  document.getElementById("btn-nuovo-allenamento").onclick = () => { allenamentoCorrenteId = null; allenamentiVista = "form"; render(); };
+  content.querySelectorAll("[data-apri-allenamento]").forEach(el => {
+    el.onclick = () => { allenamentoCorrenteId = el.dataset.apriAllenamento; allenamentiVista = "form"; render(); };
+  });
+  content.querySelectorAll("[data-elimina-allenamento]").forEach(el => {
+    el.onclick = (ev) => { ev.stopPropagation(); eliminaAllenamento(r, el.dataset.eliminaAllenamento); };
+  });
+}
+
+function allenamentoCardHTML(al) {
+  const nBlocchi = (al.blocchi || []).length;
+  return `
+    <div class="candidato-card" data-apri-allenamento="${esc(al.id)}" style="cursor:pointer;">
+      <div class="candidato-card-header">
+        <strong>${al.numeroSessione ? esc(al.numeroSessione) : "Allenamento"}${al.data ? " — " + formatDataIt(al.data) : ""}</strong>
+        <button class="btn btn-ghost btn-sm" data-elimina-allenamento="${esc(al.id)}">Elimina</button>
+      </div>
+      <p class="muted" style="font-size:12.5px; margin:4px 0 0;">
+        ${[al.categoria, al.mdOffset, al.luogo].filter(Boolean).map(v => esc(v)).join(" · ")}
+        ${nBlocchi ? ` · ${nBlocchi} esercizi${nBlocchi === 1 ? "o" : "i"}` : ""}
+      </p>
+    </div>
+  `;
+}
+
+function eliminaAllenamento(r, id) {
+  const al = (r.allenamenti || []).find(x => x.id === id);
+  if (!al) return;
+  if (!confirm(`Eliminare questo allenamento${al.numeroSessione ? ` ("${al.numeroSessione}")` : ""}?`)) return;
+  r.allenamenti = (r.allenamenti || []).filter(x => x.id !== id);
+  savePlayers();
+  if (allenamentoCorrenteId === id) allenamentoCorrenteId = null;
+  render();
+}
+
+function renderAllenamentoForm(content, r) {
+  const al = allenamentoCorrenteId ? (r.allenamenti || []).find(x => x.id === allenamentoCorrenteId) : null;
+  const pa = (al && al.playersAvailable) || {};
+  const gps = (al && al.gps) || {};
+  content.innerHTML = `
+    <div class="import-box raduno-dettaglio-box">
+      <div class="candidato-card-header">
+        <h2 style="margin:0;">${al ? "Modifica allenamento" : "Nuovo allenamento"}</h2>
+        <div class="import-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-annulla-allenamento-top">Annulla</button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label>Sessione <span class="muted" style="font-weight:400;">(es. "Session 1")</span>
+          <input type="text" id="am-sessione" value="${esc(al ? al.numeroSessione : "")}">
+        </label>
+        <label>Data allenamento
+          <input type="date" id="am-data" value="${esc(al ? al.data : "")}">
+        </label>
+        <label>Categoria/Squadra
+          <input type="text" id="am-categoria" placeholder="es. BEJUNE U17" value="${esc(al && al.categoria ? al.categoria : (r.annata || r.nome || ""))}">
+        </label>
+        <label>MD <span class="muted" style="font-weight:400;">(scarto dalla partita, es. "MD-2")</span>
+          <input type="text" id="am-md" value="${esc(al ? al.mdOffset : "")}">
+        </label>
+        <label>Data partita di riferimento
+          <input type="date" id="am-kickoff-data" value="${esc(al ? al.kickoffData : "")}">
+        </label>
+        <label>Ora partita
+          <input type="time" id="am-kickoff-ora" value="${esc(al ? al.kickoffOra : "")}">
+        </label>
+        <label>Luogo
+          <input type="text" id="am-luogo" value="${esc(al ? al.luogo : "")}">
+        </label>
+      </div>
+      <label class="full">Note
+        <textarea id="am-note" rows="3" style="display:block; width:100%; box-sizing:border-box; margin-top:6px;">${esc(al ? al.note : "")}</textarea>
+      </label>
+
+      <div class="modal-section">
+        <h3>Players available</h3>
+        <div class="form-grid">
+          ${PLAYERS_AVAILABLE_CAMPI.map(c => `
+          <label>${esc(c.label)}
+            <input type="number" min="0" class="am-pa" data-campo="${c.chiave}" value="${pa[c.chiave] != null ? esc(pa[c.chiave]) : ""}">
+          </label>`).join("")}
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <h3>GPS parameters</h3>
+        <div class="form-grid">
+          ${GPS_CAMPI.map(c => `
+          <label>${esc(c.label)}
+            <input type="text" class="am-gps" data-campo="${c.chiave}" value="${gps[c.chiave] != null ? esc(gps[c.chiave]) : ""}">
+          </label>`).join("")}
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <h3>Esercizi della sessione</h3>
+        <div id="blocchi-container" class="dyn-rows"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-aggiungi-blocco" style="margin-top:8px;">+ Aggiungi blocco esercizio</button>
+      </div>
+
+      <div class="import-actions" style="margin-top:16px;">
+        <button class="btn btn-primary" id="btn-salva-allenamento">${al ? "Salva modifiche" : "Crea allenamento"}</button>
+        <button class="btn btn-ghost" id="btn-annulla-allenamento">Annulla</button>
+      </div>
+    </div>
+  `;
+
+  const blocchiContainer = document.getElementById("blocchi-container");
+  if (al && al.blocchi && al.blocchi.length) {
+    al.blocchi.forEach(b => blocchiContainer.appendChild(creaBloccoAllenamento(b)));
+  }
+  document.getElementById("btn-aggiungi-blocco").onclick = () => blocchiContainer.appendChild(creaBloccoAllenamento());
+
+  const annulla = () => { allenamentiVista = "lista"; allenamentoCorrenteId = null; render(); };
+  document.getElementById("btn-annulla-allenamento-top").onclick = annulla;
+  document.getElementById("btn-annulla-allenamento").onclick = annulla;
+  document.getElementById("btn-salva-allenamento").onclick = () => salvaAllenamentoDaForm(r, al);
+}
+
+function creaBloccoAllenamento(blocco) {
+  blocco = blocco || {};
+  const div = document.createElement("div");
+  div.className = "candidato-card blocco-allenamento-row";
+  div.dataset.blocId = blocco.id || uid();
+  let immagineBlocco = blocco.immagine || "";
+  const eserciziOrdinati = esercizi.slice().sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
+  div.innerHTML = `
+    <div class="candidato-card-header">
+      <input type="text" class="ba-numero" placeholder="N. (es. 1, 2, 3.a)" style="max-width:130px;" value="${esc(blocco.numero || "")}">
+      <button type="button" class="btn-remove-row" title="Rimuovi blocco">✕</button>
+    </div>
+    <div class="form-grid">
+      <label>Esercizio dall'Eserciziario <span class="muted" style="font-weight:400;">(opzionale)</span>
+        <select class="ba-esercizio">
+          <option value="">— Nessuno (titolo libero) —</option>
+          ${eserciziOrdinati.map(es => `<option value="${esc(es.id)}" ${blocco.esercizioId === es.id ? "selected" : ""}>${esc(es.nome)}</option>`).join("")}
+        </select>
+      </label>
+      <label>Titolo
+        <input type="text" class="ba-titolo" value="${esc(blocco.titolo || "")}">
+      </label>
+      <label>Training Load
+        <input type="text" class="ba-carico" placeholder="es. Low-Medium, Medium, High" value="${esc(blocco.caricoTesto || "")}">
+      </label>
+      <label>Tempo totale (minuti)
+        <input type="number" class="ba-tempo" min="0" value="${blocco.tempoMinuti != null && blocco.tempoMinuti !== "" ? esc(blocco.tempoMinuti) : ""}">
+      </label>
+      <label>Dimensioni
+        <input type="text" class="ba-dimensioni" placeholder="es. 1/2 Pitch, 33x28m" value="${esc(blocco.dimensioni || "")}">
+      </label>
+    </div>
+    <label class="full">Descrizione / indicazioni tattiche
+      <textarea class="ba-descrizione" rows="5" style="display:block; width:100%; box-sizing:border-box; margin-top:6px;">${esc(blocco.descrizione || "")}</textarea>
+    </label>
+    <div class="foto-upload" style="margin-top:8px;">
+      <div class="foto-preview-wrap">
+        <img class="ba-immagine-preview foto-preview ${immagineBlocco ? "" : "foto-vuota"}" src="${immagineBlocco ? esc(immagineBlocco) : ""}" alt="">
+      </div>
+      <div class="foto-upload-actions">
+        <label class="btn btn-ghost btn-sm file-label">Carica foto/schema<input type="file" class="ba-immagine-input" accept="image/*"></label>
+        <button type="button" class="btn btn-ghost btn-sm ba-rimuovi-immagine" style="display:${immagineBlocco ? "inline-flex" : "none"}">Rimuovi immagine</button>
+      </div>
+    </div>
+  `;
+  div.querySelector(".btn-remove-row").onclick = () => div.remove();
+
+  const esercizioSelect = div.querySelector(".ba-esercizio");
+  const titoloInput = div.querySelector(".ba-titolo");
+  esercizioSelect.onchange = () => {
+    if (esercizioSelect.value && !titoloInput.value.trim()) {
+      const es = esercizi.find(x => x.id === esercizioSelect.value);
+      if (es) titoloInput.value = es.nome;
+    }
+  };
+
+  const imgInput = div.querySelector(".ba-immagine-input");
+  const imgPreview = div.querySelector(".ba-immagine-preview");
+  const btnRimuovi = div.querySelector(".ba-rimuovi-immagine");
+  imgInput.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      immagineBlocco = await ridimensionaImmagine(file, 480, 0.8);
+      imgPreview.src = immagineBlocco;
+      imgPreview.classList.remove("foto-vuota");
+      btnRimuovi.style.display = "inline-flex";
+    } catch (err) {
+      alert("Non sono riuscito a caricare questa immagine: " + err.message);
+    }
+  };
+  btnRimuovi.onclick = () => {
+    immagineBlocco = "";
+    imgPreview.src = "";
+    imgPreview.classList.add("foto-vuota");
+    btnRimuovi.style.display = "none";
+    imgInput.value = "";
+  };
+  // Esposto sull'elemento stesso (invece che in una variabile esterna)
+  // perché ogni blocco ha la propria closure indipendente, e al salvataggio
+  // dobbiamo poter rileggere l'immagine di CIASCUN blocco presente nel DOM.
+  div.leggiImmagineBlocco = () => immagineBlocco;
+  return div;
+}
+
+function salvaAllenamentoDaForm(r, vecchioAllenamento) {
+  const playersAvailable = {};
+  document.querySelectorAll(".am-pa").forEach(inp => {
+    const v = inp.value.trim();
+    if (v !== "") playersAvailable[inp.dataset.campo] = parseInt(v, 10);
+  });
+  const gps = {};
+  document.querySelectorAll(".am-gps").forEach(inp => {
+    const v = inp.value.trim();
+    if (v !== "") gps[inp.dataset.campo] = v;
+  });
+  const blocchi = [...document.querySelectorAll("#blocchi-container .blocco-allenamento-row")].map(div => ({
+    id: div.dataset.blocId,
+    numero: div.querySelector(".ba-numero").value.trim(),
+    esercizioId: div.querySelector(".ba-esercizio").value || null,
+    titolo: div.querySelector(".ba-titolo").value.trim(),
+    caricoTesto: div.querySelector(".ba-carico").value.trim(),
+    tempoMinuti: div.querySelector(".ba-tempo").value.trim(),
+    dimensioni: div.querySelector(".ba-dimensioni").value.trim(),
+    descrizione: div.querySelector(".ba-descrizione").value.trim(),
+    immagine: div.leggiImmagineBlocco ? div.leggiImmagineBlocco() : "",
+    // Riservato per il prossimo incremento (piazzamento colorato dei
+    // giocatori sul campetto di questo blocco) — vedi commento più sopra.
+    posizionamento: [],
+  }));
+
+  const allenamento = {
+    ...(vecchioAllenamento || {}),
+    id: vecchioAllenamento ? vecchioAllenamento.id : uid(),
+    creatoIl: vecchioAllenamento ? vecchioAllenamento.creatoIl : new Date().toISOString(),
+    modificatoIl: new Date().toISOString(),
+    numeroSessione: document.getElementById("am-sessione").value.trim(),
+    data: document.getElementById("am-data").value,
+    categoria: document.getElementById("am-categoria").value.trim(),
+    mdOffset: document.getElementById("am-md").value.trim(),
+    kickoffData: document.getElementById("am-kickoff-data").value,
+    kickoffOra: document.getElementById("am-kickoff-ora").value,
+    luogo: document.getElementById("am-luogo").value.trim(),
+    note: document.getElementById("am-note").value.trim(),
+    playersAvailable,
+    gps,
+    blocchi,
+  };
+
+  r.allenamenti = r.allenamenti || [];
+  if (vecchioAllenamento) {
+    const idx = r.allenamenti.findIndex(x => x.id === vecchioAllenamento.id);
+    r.allenamenti[idx] = allenamento;
+  } else {
+    r.allenamenti.push(allenamento);
+  }
+  savePlayers();
+  allenamentoCorrenteId = allenamento.id;
+  allenamentiVista = "lista";
+  render();
+}
 
 // Rimuove SOLO un token di categoria età (U21, U-21, M15, ecc.) da un testo,
 // lasciando intatto tutto il resto — comprese sigle come "1893" che fanno
@@ -1892,6 +2269,11 @@ let dropboxConnesso = false;
 let anthropicApiKey = "";
 let geminiApiKey = "";
 let ultimoContenutoRemoto = null;
+// Ultimo "content_hash" (impronta leggera fornita da Dropbox, non il
+// contenuto intero) che sappiamo essere allineato con Dropbox. Usato per
+// evitare di riscaricare tutto il file ad ogni singolo salvataggio — vedi
+// verificaConflittoPrimaDiSalvare più sotto.
+let ultimoContentHashRemoto = null;
 
 /* ===================== Copia locale / uso offline =====================
    L'app tiene SEMPRE una copia dei dati sul dispositivo (IndexedDB), oltre
@@ -1905,7 +2287,7 @@ const CHIAVE_SYNC_IN_SOSPESO = "sync-in-sospeso";
 let sincronizzazioneInSospeso = false;
 
 async function salvaDatiLocali() {
-  await idbSet(CHIAVE_DATI_LOCALI, { players, eventi, raduni, allenatori, salvatoIl: new Date().toISOString() });
+  await idbSet(CHIAVE_DATI_LOCALI, { players, eventi, raduni, allenatori, esercizi, salvatoIl: new Date().toISOString() });
 }
 
 async function caricaDatiLocali() {
@@ -2029,6 +2411,7 @@ async function completaConnessioneDropbox(code) {
     eventi = risultato.eventi || [];
     raduni = risultato.raduni || [];
     allenatori = risultato.allenatori || [];
+    esercizi = risultato.esercizi || [];
     renderDropboxStatusBar("connesso");
     render();
     if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -2065,8 +2448,15 @@ async function scaricaDaDropbox() {
       "Dropbox-API-Arg": JSON.stringify({ path: dropboxFilePath })
     }
   });
-  if (resp.status === 409) { ultimoContenutoRemoto = ""; return { players: [], eventi: [], raduni: [], allenatori: [], fileNonTrovato: true }; } // nessun file a questo percorso
+  if (resp.status === 409) { ultimoContenutoRemoto = ""; ultimoContentHashRemoto = null; return { players: [], eventi: [], raduni: [], allenatori: [], fileNonTrovato: true }; } // nessun file a questo percorso
   if (!resp.ok) throw new Error("errore nel download da Dropbox (" + resp.status + ")");
+  try {
+    // Dropbox restituisce i metadati del file (incluso il content_hash) in
+    // questo header anche per l'endpoint di download: li teniamo per non
+    // dover rifare una chiamata separata solo per conoscere l'hash.
+    const risultatoHeader = resp.headers.get("Dropbox-API-Result");
+    if (risultatoHeader) ultimoContentHashRemoto = JSON.parse(risultatoHeader).content_hash || null;
+  } catch (e) { /* non blocchiamo per un header non leggibile */ }
   const text = await resp.text();
   ultimoContenutoRemoto = text;
   try { return { ...parseDatabaseJSON(text), fileNonTrovato: false }; }
@@ -2084,8 +2474,37 @@ function avvisaSePercorsoNonTrovato() {
   );
 }
 
+// Chiamata "leggera" (poche centinaia di byte di risposta, non il
+// contenuto del file) per sapere se qualcuno ha cambiato il file su
+// Dropbox dall'ultima volta che l'abbiamo letto/scritto noi. Usata per
+// evitare di riscaricare l'intero database (che con una connessione lenta
+// rendeva ogni singolo salvataggio molto pesante e l'app sembrava bloccata)
+// quando in realtà, nella stragrande maggioranza dei casi, nessuno ha
+// toccato il file nel frattempo.
+async function contentHashRemotoAttuale() {
+  const token = await assicuraTokenValido();
+  const resp = await fetch("https://api.dropboxapi.com/2/files/get_metadata", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ path: dropboxFilePath })
+  });
+  if (resp.status === 409) return { trovato: false, hash: null }; // il file non esiste ancora
+  if (!resp.ok) return { trovato: true, hash: undefined }; // errore nella sola verifica: non blocchiamo
+  const data = await resp.json();
+  return { trovato: true, hash: data.content_hash || null };
+}
+
 async function verificaConflittoPrimaDiSalvare() {
   try {
+    if (ultimoContentHashRemoto !== null) {
+      const { trovato, hash } = await contentHashRemotoAttuale();
+      if (!trovato) return true; // il file non esiste ancora, nessun conflitto possibile
+      if (hash === undefined) return true; // errore nella sola verifica, non blocchiamo il salvataggio
+      if (hash === ultimoContentHashRemoto) return true; // nessuna modifica remota: si salva senza scaricare nulla
+      // L'hash è cambiato: qualcuno ha davvero modificato il file. Solo in
+      // questo caso (che dovrebbe essere raro) scarichiamo il contenuto
+      // intero per mostrare il confronto/la scelta qui sotto.
+    }
     const token = await assicuraTokenValido();
     const resp = await fetch("https://content.dropboxapi.com/2/files/download", {
       method: "POST",
@@ -2093,6 +2512,10 @@ async function verificaConflittoPrimaDiSalvare() {
     });
     if (resp.status === 409) return true; // il file non esiste ancora, nessun conflitto possibile
     if (!resp.ok) return true; // non blocchiamo il salvataggio per un errore nella sola verifica
+    try {
+      const risultatoHeader = resp.headers.get("Dropbox-API-Result");
+      if (risultatoHeader) ultimoContentHashRemoto = JSON.parse(risultatoHeader).content_hash || null;
+    } catch (e) { /* non blocchiamo per un header non leggibile */ }
     const testoRemoto = await resp.text();
     if (ultimoContenutoRemoto !== null && testoRemoto !== ultimoContenutoRemoto) {
       const sovrascrivere = confirm(
@@ -2105,6 +2528,7 @@ async function verificaConflittoPrimaDiSalvare() {
         eventi = dati.eventi;
         raduni = dati.raduni;
         allenatori = dati.allenatori || [];
+        esercizi = dati.esercizi || [];
         ultimoContenutoRemoto = testoRemoto;
         render();
         return false;
@@ -2121,7 +2545,7 @@ async function caricaSuDropbox() {
   const ok = await verificaConflittoPrimaDiSalvare();
   if (!ok) return;
   const token = await assicuraTokenValido();
-  const testoNuovo = JSON.stringify({ players, eventi, raduni, allenatori }, null, 2);
+  const testoNuovo = JSON.stringify({ players, eventi, raduni, allenatori, esercizi }, null, 2);
   const resp = await fetch("https://content.dropboxapi.com/2/files/upload", {
     method: "POST",
     headers: {
@@ -2133,6 +2557,13 @@ async function caricaSuDropbox() {
   });
   if (!resp.ok) throw new Error("errore nel salvataggio su Dropbox (" + resp.status + ")");
   ultimoContenutoRemoto = testoNuovo;
+  try {
+    // La risposta di /files/upload è già di per sé il JSON con i metadati
+    // del file appena salvato (content_hash incluso): lo teniamo per il
+    // prossimo controllo leggero, senza bisogno di un'altra chiamata.
+    const meta = await resp.json();
+    ultimoContentHashRemoto = meta.content_hash || null;
+  } catch (e) { ultimoContentHashRemoto = null; }
 }
 
 async function savePlayers() {
@@ -2219,7 +2650,7 @@ async function eseguiBackupAutomaticoSeNecessario() {
       if (giorniPassati < BACKUP_INTERVALLO_GIORNI) return; // non è ancora ora
     }
     const token = await assicuraTokenValido();
-    const contenuto = JSON.stringify({ players, eventi, raduni, allenatori }, null, 2);
+    const contenuto = JSON.stringify({ players, eventi, raduni, allenatori, esercizi }, null, 2);
     const percorsoBackup = `${cartellaBackup()}/scout-backup-${oggi}.json`;
     const resp = await fetch("https://content.dropboxapi.com/2/files/upload", {
       method: "POST",
@@ -2258,6 +2689,7 @@ async function ricaricaDaDropbox() {
     eventi = risultato.eventi || [];
     raduni = risultato.raduni || [];
     allenatori = risultato.allenatori || [];
+    esercizi = risultato.esercizi || [];
     renderDropboxStatusBar("connesso");
     render();
     if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -2276,6 +2708,7 @@ async function cambiaPercorsoDropbox() {
   dropboxFilePath = path;
   await idbSet("dropbox-path", dropboxFilePath);
   ultimoContenutoRemoto = null;
+  ultimoContentHashRemoto = null;
   await ricaricaDaDropbox();
 }
 
@@ -2284,6 +2717,7 @@ async function disconnettiDropbox() {
   dbx = { appKey: "", accessToken: "", refreshToken: "", expiresAt: 0 };
   dropboxConnesso = false;
   ultimoContenutoRemoto = null;
+  ultimoContentHashRemoto = null;
   await idbDelete("dropbox-refresh-token");
   await idbDelete("dropbox-appkey");
   renderDropboxStatusBar("non-configurato");
@@ -2947,6 +3381,7 @@ async function boot() {
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
   document.getElementById("nav-allenatori").onclick = () => switchTab("allenatori");
+  document.getElementById("nav-esercizi").onclick = () => switchTab("esercizi");
   document.getElementById("nav-presenze").onclick = () => switchTab("presenze");
   document.getElementById("nav-strumenti").onclick = () => switchTab("strumenti");
 
@@ -2981,6 +3416,7 @@ async function boot() {
       eventi = localeCache.eventi || [];
       raduni = localeCache.raduni || [];
       allenatori = localeCache.allenatori || [];
+      esercizi = localeCache.esercizi || [];
     }
     sincronizzazioneInSospeso = (await idbGet(CHIAVE_SYNC_IN_SOSPESO).catch(() => false)) || false;
   } catch (e) {
@@ -3017,6 +3453,7 @@ async function boot() {
         eventi = risultato.eventi || [];
         raduni = risultato.raduni || [];
         allenatori = risultato.allenatori || [];
+        esercizi = risultato.esercizi || [];
         await salvaDatiLocali();
         renderDropboxStatusBar("connesso");
         if (risultato.fileNonTrovato) avvisaSePercorsoNonTrovato();
@@ -3072,8 +3509,9 @@ function switchTab(tab, editPlayer) {
 // attaccanti in un raduno). Nel secondo caso è giusto ripartire dall'alto.
 let ultimaChiaveVistaRender = null;
 function render(editPlayer) {
-  const chiaveVista = currentTab === "raduni" ? `raduni|${raduniSezione}|${radunoCorrenteId || ""}`
+  const chiaveVista = currentTab === "raduni" ? `raduni|${raduniSezione}|${radunoCorrenteId || ""}|${raduniSezione === "allenamenti" ? allenamentiVista + "|" + (allenamentoCorrenteId || "") : ""}`
     : currentTab === "allenatori" ? `allenatori|${allenatoriSezione}|${allenatoreCorrenteId || ""}`
+    : currentTab === "esercizi" ? `esercizi|${eserciziSezione}|${esercizioCorrenteId || ""}`
     : currentTab;
   const stessaVista = chiaveVista === ultimaChiaveVistaRender;
   const scrollDaMantenere = stessaVista ? window.scrollY : 0;
@@ -3086,6 +3524,7 @@ function render(editPlayer) {
   else if (currentTab === "calendario") renderCalendario(content);
   else if (currentTab === "raduni") renderRaduni(content);
   else if (currentTab === "allenatori") renderAllenatori(content);
+  else if (currentTab === "esercizi") renderEserciziario(content);
   else if (currentTab === "presenze") renderPresenze(content);
   else if (currentTab === "strumenti") renderStrumenti(content);
 
@@ -7785,6 +8224,7 @@ function renderRaduni(content) {
   if (raduniSezione === "form") { renderRadunoForm(content); return; }
   if (raduniSezione === "dettaglio") { renderRadunoDettaglio(content); return; }
   if (raduniSezione === "importa") { renderRadunoImporta(content); return; }
+  if (raduniSezione === "allenamenti") { renderRadunoAllenamenti(content); return; }
   renderRaduniLista(content);
 }
 
@@ -8047,6 +8487,7 @@ function renderRadunoDettaglio(content) {
         <h2 style="margin:0;">${esc(r.nome)}</h2>
         <div class="import-actions">
           <button class="btn btn-ghost btn-sm" id="btn-modifica-raduno">Modifica scheda</button>
+          <button class="btn btn-ghost btn-sm" id="btn-allenamenti-raduno">Allenamenti${(r.allenamenti || []).length ? ` (${(r.allenamenti || []).length})` : ""}</button>
           <button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-dett">Esporta Lista</button>
           ${r.modulo === "1-4-4-2" ? `<button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-ufficiale">Esporta Kaderliste ufficiale</button>` : ""}
           <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
@@ -8135,6 +8576,7 @@ function renderRadunoDettaglio(content) {
 
   document.getElementById("btn-torna-lista-raduni").onclick = () => { raduniSezione = "lista"; render(); };
   document.getElementById("btn-modifica-raduno").onclick = () => { raduniSezione = "form"; render(); };
+  document.getElementById("btn-allenamenti-raduno").onclick = () => { raduniSezione = "allenamenti"; allenamentiVista = "lista"; allenamentoCorrenteId = null; render(); };
   document.getElementById("btn-esporta-raduno-dett").onclick = () => esportaRadunoExcel(r);
   if (document.getElementById("btn-esporta-raduno-ufficiale")) {
     document.getElementById("btn-esporta-raduno-ufficiale").onclick = () => esportaKaderlisteUfficiale(r);
@@ -9517,9 +9959,307 @@ function renderAllenatoreDettaglio(content) {
   });
 }
 
+/* ===================== ESERCIZIARIO =====================
+   Libreria di esercizi organizzata in tre macrocontenitori (Attacco, Difesa,
+   Standards — un esercizio può stare in più di uno). Pensato per essere
+   collegato in futuro alla sezione "Allenamenti" dentro un Raduno (vedi più
+   sotto), quando arriverà la struttura standard di un allenamento da Excel:
+   per ora è una libreria autonoma, completa di scheda/ricerca/filtri, senza
+   ancora il collegamento agli allenamenti. */
+let eserciziSezione = "lista";
+let esercizioCorrenteId = null;
+let filtroTestoEsercizi = "";
+let filtroMacrocontenitori = new Set();
+
+function renderEserciziario(content) {
+  if (eserciziSezione === "form") { renderEsercizioForm(content); return; }
+  if (eserciziSezione === "dettaglio") { renderEsercizioDettaglio(content); return; }
+  renderEserciziLista(content);
+}
+
+function renderEserciziLista(content) {
+  content.innerHTML = `
+    <div class="import-box">
+      <h2>Eserciziario</h2>
+      <p class="muted">Libreria degli esercizi di allenamento, divisa in Attacco / Difesa / Standards (un esercizio può appartenere a più di un macrocontenitore). Da qui potrete in futuro richiamare un esercizio direttamente in un allenamento di un raduno.</p>
+      <div class="import-actions">
+        <button class="btn btn-primary" id="btn-nuovo-esercizio">+ Nuovo esercizio</button>
+      </div>
+      <div class="filtri-bar" style="margin-top:14px;">
+        <input type="text" id="f-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome..." value="${esc(filtroTestoEsercizi)}">
+      </div>
+      <div class="chips-group" id="chips-macrocontenitori" style="margin-top:10px;">
+        ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip ${filtroMacrocontenitori.has(m) ? "chip-active" : ""}" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
+      </div>
+      <div class="import-subsection" id="esercizi-container"></div>
+    </div>
+  `;
+  document.getElementById("btn-nuovo-esercizio").onclick = () => { esercizioCorrenteId = null; eserciziSezione = "form"; render(); };
+  document.getElementById("f-esercizi-testo").oninput = (e) => { filtroTestoEsercizi = e.target.value; renderEserciziRisultati(); };
+  document.querySelectorAll("#chips-macrocontenitori .chip").forEach(chip => {
+    chip.onclick = () => {
+      const val = chip.dataset.val;
+      if (filtroMacrocontenitori.has(val)) filtroMacrocontenitori.delete(val); else filtroMacrocontenitori.add(val);
+      chip.classList.toggle("chip-active");
+      renderEserciziRisultati();
+    };
+  });
+  renderEserciziRisultati();
+}
+
+function renderEserciziRisultati() {
+  const container = document.getElementById("esercizi-container");
+  if (!container) return;
+  const q = filtroTestoEsercizi.trim().toLowerCase();
+  const elenco = esercizi
+    .filter(es => !q || (es.nome || "").toLowerCase().includes(q))
+    .filter(es => !filtroMacrocontenitori.size || (es.macrocontenitori || []).some(m => filtroMacrocontenitori.has(m)))
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
+
+  container.innerHTML = elenco.length
+    ? `<div class="candidati-grid">${elenco.map(es => esercizioCardHTML(es)).join("")}</div>`
+    : `<p class="muted">${esercizi.length ? "Nessun esercizio corrisponde alla ricerca/ai filtri." : "Nessun esercizio ancora — aggiungine uno con “+ Nuovo esercizio”."}</p>`;
+
+  container.querySelectorAll("[data-apri-esercizio]").forEach(el => {
+    el.onclick = () => { esercizioCorrenteId = el.dataset.apriEsercizio; eserciziSezione = "dettaglio"; render(); };
+  });
+}
+
+function esercizioCardHTML(es) {
+  const dettagli = [
+    es.durataMinuti ? `${esc(es.durataMinuti)} min` : "",
+    es.numeroGiocatori ? `${esc(es.numeroGiocatori)} giocatori` : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <div class="candidato-card" data-apri-esercizio="${esc(es.id)}" style="cursor:pointer;">
+      ${es.immagine ? `<div class="tabella-foto" style="width:100%; height:120px; border-radius:8px; margin-bottom:8px;"><img src="${esc(es.immagine)}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:8px;"></div>` : ""}
+      <div class="candidato-card-header">
+        <strong>${esc(es.nome || "Esercizio senza nome")}</strong>
+      </div>
+      <div class="card-etichette" style="margin-top:6px;">
+        ${(es.macrocontenitori || []).map(m => `<span class="chip chip-active" style="cursor:default;">${esc(m)}</span>`).join("")}
+        ${es.carico ? `<span class="carico-badge ${caricoClasse(es.carico)}">Carico ${esc(es.carico)}</span>` : ""}
+      </div>
+      <p class="muted" style="font-size:12.5px; margin:6px 0 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        ${starsHTML(es.rating)}
+        ${dettagli ? `<span>${dettagli}</span>` : ""}
+      </p>
+    </div>
+  `;
+}
+
+function renderEsercizioForm(content) {
+  const es = esercizioCorrenteId ? esercizi.find(x => x.id === esercizioCorrenteId) : null;
+  const macroSelezionati = new Set(es && es.macrocontenitori ? es.macrocontenitori : []);
+  content.innerHTML = `
+    <div class="import-box">
+      <h2>${es ? "Modifica esercizio" : "Nuovo esercizio"}</h2>
+
+      <div class="foto-upload">
+        <div class="foto-preview-wrap">
+          <img id="es-immagine-preview" class="foto-preview ${es && es.immagine ? "" : "foto-vuota"}" src="${es && es.immagine ? esc(es.immagine) : ""}" alt="">
+          <svg id="es-immagine-placeholder" class="foto-placeholder" style="display:${es && es.immagine ? "none" : "block"}" viewBox="0 0 64 64" width="56" height="56"><rect x="10" y="14" width="44" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="22" cy="26" r="4" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M12 44l14-12 10 8 8-6 8 10" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>
+        </div>
+        <div class="foto-upload-actions">
+          <label class="btn btn-ghost btn-sm file-label">Carica schema campo<input type="file" id="es-immagine-input" accept="image/*"></label>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-rimuovi-immagine-esercizio" style="display:${es && es.immagine ? "inline-flex" : "none"}">Rimuovi immagine</button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label>Nome*
+          <input type="text" id="es-nome" required value="${esc(es ? es.nome : "")}">
+        </label>
+        <label>Durata (minuti)
+          <input type="number" id="es-durata" min="0" value="${es && es.durataMinuti ? esc(es.durataMinuti) : ""}">
+        </label>
+        <label>Numero giocatori
+          <input type="text" id="es-numgiocatori" placeholder="es. 8-12" value="${es && es.numeroGiocatori ? esc(es.numeroGiocatori) : ""}">
+        </label>
+        <label>Carico fisico
+          <select id="es-carico">
+            <option value="" ${!es || !es.carico ? "selected" : ""}>— Non specificato —</option>
+            ${CARICO_OPZIONI.map(c => `<option value="${esc(c.valore)}" ${es && es.carico === c.valore ? "selected" : ""}>${esc(c.valore)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Materiale necessario
+          <input type="text" id="es-materiale" placeholder="es. coni, sagome, pettorine" value="${es && es.materiale ? esc(es.materiale) : ""}">
+        </label>
+        <label>Link video
+          <input type="url" id="es-video" placeholder="https://..." value="${es && es.video ? esc(es.video) : ""}">
+        </label>
+      </div>
+
+      <label class="full">Macrocontenitore <span class="muted" style="font-weight:400;">(puoi selezionarne più di uno)</span>
+        <div class="chips-group" id="es-macrocontenitori-chips" style="margin-top:6px;">
+          ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip ${macroSelezionati.has(m) ? "chip-active" : ""}" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
+        </div>
+      </label>
+
+      <label class="full">Valutazione
+        <div style="margin-top:6px;">
+          <span class="star-rating" id="es-rating-input" data-value="${es && es.rating ? esc(es.rating) : 0}">
+            ${[1, 2, 3, 4, 5].map(n => `<span class="star ${(es && es.rating || 0) >= n ? "star-filled" : ""}" data-star="${n}">★</span>`).join("")}
+          </span>
+        </div>
+      </label>
+
+      <label class="full">Descrizione / svolgimento
+        <textarea id="es-descrizione" rows="6" style="display:block; width:100%; box-sizing:border-box; margin-top:6px;">${esc(es ? es.descrizione : "")}</textarea>
+      </label>
+
+      <label class="full">Note
+        <textarea id="es-note" rows="3" style="display:block; width:100%; box-sizing:border-box; margin-top:6px;">${esc(es ? es.note : "")}</textarea>
+      </label>
+
+      <div class="import-actions">
+        <button class="btn btn-primary" id="btn-salva-esercizio">${es ? "Salva modifiche" : "Crea esercizio"}</button>
+        <button class="btn btn-ghost" id="btn-annulla-esercizio">Annulla</button>
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll("#es-macrocontenitori-chips .chip").forEach(chip => {
+    chip.onclick = () => chip.classList.toggle("chip-active");
+  });
+
+  const ratingInput = document.getElementById("es-rating-input");
+  ratingInput.querySelectorAll(".star").forEach(star => {
+    star.onclick = () => {
+      const n = parseInt(star.dataset.star, 10);
+      ratingInput.dataset.value = n;
+      ratingInput.querySelectorAll(".star").forEach(s => s.classList.toggle("star-filled", parseInt(s.dataset.star, 10) <= n));
+    };
+  });
+
+  let immagineCorrente = es && es.immagine ? es.immagine : "";
+  document.getElementById("es-immagine-input").onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      immagineCorrente = await ridimensionaImmagine(file, 480, 0.8);
+      const img = document.getElementById("es-immagine-preview");
+      img.src = immagineCorrente;
+      img.classList.remove("foto-vuota");
+      document.getElementById("es-immagine-placeholder").style.display = "none";
+      document.getElementById("btn-rimuovi-immagine-esercizio").style.display = "inline-flex";
+    } catch (err) {
+      alert("Non sono riuscito a caricare questa immagine: " + err.message);
+    }
+  };
+  document.getElementById("btn-rimuovi-immagine-esercizio").onclick = () => {
+    immagineCorrente = "";
+    const img = document.getElementById("es-immagine-preview");
+    img.src = "";
+    img.classList.add("foto-vuota");
+    document.getElementById("es-immagine-placeholder").style.display = "block";
+    document.getElementById("btn-rimuovi-immagine-esercizio").style.display = "none";
+    document.getElementById("es-immagine-input").value = "";
+  };
+
+  document.getElementById("btn-annulla-esercizio").onclick = () => {
+    eserciziSezione = es ? "dettaglio" : "lista";
+    render();
+  };
+  document.getElementById("btn-salva-esercizio").onclick = () => salvaEsercizioDaForm(es, () => immagineCorrente);
+}
+
+function salvaEsercizioDaForm(vecchioEsercizio, leggiImmagine) {
+  const nome = document.getElementById("es-nome").value.trim();
+  if (!nome) { alert("Inserisci il nome dell'esercizio."); return; }
+  const macrocontenitori = [...document.querySelectorAll("#es-macrocontenitori-chips .chip.chip-active")].map(c => c.dataset.val);
+  const rating = parseInt(document.getElementById("es-rating-input").dataset.value, 10) || 0;
+
+  const esercizio = {
+    ...(vecchioEsercizio || {}),
+    id: vecchioEsercizio ? vecchioEsercizio.id : uid(),
+    creatoIl: vecchioEsercizio ? vecchioEsercizio.creatoIl : new Date().toISOString(),
+    modificatoIl: new Date().toISOString(),
+    nome,
+    macrocontenitori,
+    descrizione: document.getElementById("es-descrizione").value.trim(),
+    immagine: leggiImmagine(),
+    durataMinuti: document.getElementById("es-durata").value.trim(),
+    numeroGiocatori: document.getElementById("es-numgiocatori").value.trim(),
+    materiale: document.getElementById("es-materiale").value.trim(),
+    video: document.getElementById("es-video").value.trim(),
+    carico: document.getElementById("es-carico").value || "",
+    rating,
+    note: document.getElementById("es-note").value.trim(),
+  };
+
+  if (vecchioEsercizio) {
+    const idx = esercizi.findIndex(x => x.id === vecchioEsercizio.id);
+    esercizi[idx] = esercizio;
+  } else {
+    esercizi.push(esercizio);
+  }
+  savePlayers();
+  esercizioCorrenteId = esercizio.id;
+  eserciziSezione = "dettaglio";
+  render();
+}
+
+function eliminaEsercizio(id) {
+  const es = esercizi.find(x => x.id === id);
+  if (!es) return;
+  if (!confirm(`Eliminare l'esercizio "${es.nome}"?`)) return;
+  esercizi = esercizi.filter(x => x.id !== id);
+  savePlayers();
+  esercizioCorrenteId = null;
+  eserciziSezione = "lista";
+  render();
+}
+
+function renderEsercizioDettaglio(content) {
+  const es = esercizi.find(x => x.id === esercizioCorrenteId);
+  if (!es) { eserciziSezione = "lista"; render(); return; }
+  content.innerHTML = `
+    <div class="import-box raduno-dettaglio-box">
+      <div class="candidato-card-header">
+        <h2 style="margin:0;">${esc(es.nome)}</h2>
+        <div class="import-actions">
+          <button class="btn btn-ghost btn-sm" id="btn-modifica-esercizio">Modifica</button>
+          <button class="btn btn-ghost btn-sm" id="btn-elimina-esercizio">Elimina</button>
+          <button class="btn btn-ghost btn-sm" id="btn-torna-lista-esercizi">← Torna alla lista</button>
+        </div>
+      </div>
+      <div class="card-etichette" style="margin-top:6px;">
+        ${(es.macrocontenitori || []).map(m => `<span class="chip chip-active" style="cursor:default;">${esc(m)}</span>`).join("")}
+        ${es.carico ? `<span class="carico-badge ${caricoClasse(es.carico)}">Carico ${esc(es.carico)}</span>` : ""}
+      </div>
+      <p style="margin:8px 0;">${starsHTML(es.rating)}</p>
+      <p class="muted" style="font-size:13px;">
+        ${[
+          es.durataMinuti ? `Durata: ${esc(es.durataMinuti)} min` : "",
+          es.numeroGiocatori ? `Giocatori: ${esc(es.numeroGiocatori)}` : "",
+          es.materiale ? `Materiale: ${esc(es.materiale)}` : "",
+        ].filter(Boolean).join(" · ")}
+      </p>
+      ${es.video ? `<p><a href="${esc(es.video)}" target="_blank" rel="noopener">▶ Video dimostrativo</a></p>` : ""}
+      ${es.immagine ? `<div class="foto-ingrandita-box" style="max-width:420px; margin:10px 0;"><img src="${esc(es.immagine)}" alt="" style="width:100%; border-radius:8px;"></div>` : ""}
+
+      <div class="modal-section">
+        <h3>Descrizione / svolgimento</h3>
+        <p style="white-space:pre-wrap;">${es.descrizione ? esc(es.descrizione) : `<span class="muted">Nessuna descrizione ancora — aggiungila da "Modifica".</span>`}</p>
+      </div>
+
+      ${es.note ? `
+      <div class="modal-section">
+        <h3>Note</h3>
+        <p style="white-space:pre-wrap;">${esc(es.note)}</p>
+      </div>` : ""}
+    </div>
+  `;
+
+  document.getElementById("btn-torna-lista-esercizi").onclick = () => { eserciziSezione = "lista"; render(); };
+  document.getElementById("btn-modifica-esercizio").onclick = () => { eserciziSezione = "form"; render(); };
+  document.getElementById("btn-elimina-esercizio").onclick = () => eliminaEsercizio(es.id);
+}
+
 /* ===================== BACKUP ===================== */
 function esportaBackup() {
-  const blob = new Blob([JSON.stringify({ players, eventi, raduni, allenatori }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ players, eventi, raduni, allenatori, esercizi }, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   const oggi = dataOggiLocale();
@@ -9542,11 +10282,13 @@ function importaBackup(e) {
       const nEventi = dati.eventi.length;
       const nRaduni = (dati.raduni || []).length;
       const nAllenatori = (dati.allenatori || []).length;
-      if (confirm(`Il backup contiene ${nGiocatori} giocatori, ${nEventi} eventi di calendario, ${nRaduni} raduni U16 e ${nAllenatori} allenatori. Sostituire tutti i dati attuali (${players.length} giocatori, ${eventi.length} eventi, ${raduni.length} raduni, ${allenatori.length} allenatori)? Premi Annulla per non fare nulla.`)) {
+      const nEsercizi = (dati.esercizi || []).length;
+      if (confirm(`Il backup contiene ${nGiocatori} giocatori, ${nEventi} eventi di calendario, ${nRaduni} raduni U16, ${nAllenatori} allenatori e ${nEsercizi} esercizi. Sostituire tutti i dati attuali (${players.length} giocatori, ${eventi.length} eventi, ${raduni.length} raduni, ${allenatori.length} allenatori, ${esercizi.length} esercizi)? Premi Annulla per non fare nulla.`)) {
         players = dati.players;
         eventi = dati.eventi;
         raduni = dati.raduni || [];
         allenatori = dati.allenatori || [];
+        esercizi = dati.esercizi || [];
         await savePlayers();
         render();
         alert("Backup ripristinato correttamente.");
