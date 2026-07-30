@@ -1070,6 +1070,77 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   gap: 14px;
 }
 .candidati-grid .candidato-card{ margin-bottom: 0; }
+
+/* ---------- Piazzamento colorato giocatori sul campetto (Allenamenti) ---------- */
+.colore-swatch{
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+.colore-swatch.selezionato{ border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+.colore-swatch-rosso{ background: #c1554a; }
+.colore-swatch-verde{ background: #4f9e6e; }
+.colore-swatch-azzurro{ background: #3aa6e0; }
+.colore-swatch-arancione{ background: #e0a739; }
+.colore-swatch-bianco{ background: #f2efe6; }
+
+.mini-pitch{
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  aspect-ratio: 3 / 2;
+  margin-top: 10px;
+  background: repeating-linear-gradient(90deg, #2f6b45 0, #2f6b45 40px, #356f49 40px, #356f49 80px);
+  border: 2px solid rgba(242,239,230,0.75);
+  border-radius: 6px;
+  cursor: crosshair;
+  overflow: hidden;
+  touch-action: none;
+}
+.mini-pitch::before{ /* linea di metà campo */
+  content: "";
+  position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 2px; background: rgba(242,239,230,0.6);
+  transform: translateX(-50%);
+}
+.mini-pitch::after{ /* cerchio di centrocampo */
+  content: "";
+  position: absolute; left: 50%; top: 50%;
+  width: 15%; aspect-ratio: 1/1;
+  border: 2px solid rgba(242,239,230,0.6);
+  border-radius: 50%;
+  transform: translate(-50%,-50%);
+}
+.mini-pitch-area-sx, .mini-pitch-area-dx{
+  position: absolute; top: 25%; bottom: 25%;
+  width: 8%;
+  border: 2px solid rgba(242,239,230,0.6);
+}
+.mini-pitch-area-sx{ left: 0; border-left: none; }
+.mini-pitch-area-dx{ right: 0; border-right: none; }
+.pitch-marker{
+  position: absolute;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 700;
+  color: #14210f;
+  border: 2px solid rgba(0,0,0,0.45);
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.pitch-marker.marker-rosso{ background: #c1554a; color: #fff; }
+.pitch-marker.marker-verde{ background: #4f9e6e; color: #072b12; }
+.pitch-marker.marker-azzurro{ background: #3aa6e0; color: #06253a; }
+.pitch-marker.marker-arancione{ background: #e0a739; color: #2a1a03; }
+.pitch-marker.marker-bianco{ background: #f2efe6; color: #14210f; }
+.piazzamento-wrap{ margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .cal-giocatori-collegati{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .candidato-card-header{
   display: flex;
@@ -1341,7 +1412,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 10:30</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 12:10</div>
         </div>
       </div>
     </header>
@@ -1507,10 +1578,9 @@ function starsHTML(valore) {
 // ognuno opzionalmente collegato a una voce dell'Eserciziario, con
 // Training Load / Tempo / Dimensioni ed eventuale descrizione specifici di
 // QUESTA sessione (possono differire da un utilizzo all'altro dello stesso
-// esercizio). Il piazzamento colorato dei giocatori sul campetto mini di
-// ogni blocco (la "pagina 2" della scheda Excel) e l'import/export Excel
-// completo sono il prossimo incremento: il campo "posizionamento" di ogni
-// blocco è già riservato per quello, ma resta vuoto e non ha ancora UI.
+// esercizio), più il piazzamento colorato dei giocatori sul campetto mini
+// del blocco (la "pagina 2" della scheda Excel — vedi COLORI_PIAZZAMENTO e
+// creaBloccoAllenamento).
 const PLAYERS_AVAILABLE_CAMPI = [
   { chiave: "gk", label: "GK" },
   { chiave: "fieldPlayers", label: "Field players" },
@@ -1536,6 +1606,20 @@ const GPS_CAMPI = [
 let allenamentiVista = "lista";
 let allenamentoCorrenteId = null;
 
+// I 5 colori richiesti per il piazzamento digitale dei giocatori sul
+// campetto di ogni blocco esercizio (rosso/verde/azzurro/arancione/bianco),
+// tipicamente usati per distinguere squadre/ruoli diversi nello schema.
+const COLORI_PIAZZAMENTO = [
+  { chiave: "rosso", nome: "Rosso", css: "#c1554a" },
+  { chiave: "verde", nome: "Verde", css: "#4f9e6e" },
+  { chiave: "azzurro", nome: "Azzurro", css: "#3aa6e0" },
+  { chiave: "arancione", nome: "Arancione", css: "#e0a739" },
+  { chiave: "bianco", nome: "Bianco", css: "#f2efe6" },
+];
+function coloreePiazzamento(chiave) {
+  return COLORI_PIAZZAMENTO.find(c => c.chiave === chiave) || COLORI_PIAZZAMENTO[0];
+}
+
 function renderRadunoAllenamenti(content) {
   const r = raduni.find(x => x.id === radunoCorrenteId);
   if (!r) { raduniSezione = "lista"; render(); return; }
@@ -1552,10 +1636,14 @@ function renderAllenamentiLista(content, r) {
         <h2 style="margin:0;">Allenamenti — ${esc(r.nome)}</h2>
         <div class="import-actions">
           <button class="btn btn-primary btn-sm" id="btn-nuovo-allenamento">+ Nuovo allenamento</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+            Importa da Excel
+            <input type="file" accept=".xlsx,.xls" id="input-importa-allenamento" style="display:none;">
+          </label>
           <button class="btn btn-ghost btn-sm" id="btn-torna-raduno-da-allenamenti">← Torna al raduno</button>
         </div>
       </div>
-      <p class="muted">Ogni allenamento ricalca la struttura della vostra scheda Excel: intestazione sessione, Players available, GPS parameters e i blocchi esercizio (collegabili a una voce dell'Eserciziario). Il piazzamento colorato dei giocatori sui campetti e l'import/export Excel completo arrivano nel prossimo passaggio.</p>
+      <p class="muted">Ogni allenamento ricalca la struttura della vostra scheda Excel: intestazione sessione, Players available, GPS parameters, blocchi esercizio (collegabili a una voce dell'Eserciziario) e il piazzamento colorato dei giocatori sui campetti. "Esporta Excel" e "Stampa" sono sulla scheda di ogni allenamento; "Importa da Excel" qui sopra rilegge un file esportato da questa app (non il template Excel originale).</p>
       <div class="import-subsection">
         ${elenco.length ? elenco.map(al => allenamentoCardHTML(al)).join("") : `<p class="muted">Nessun allenamento ancora registrato per questo raduno.</p>`}
       </div>
@@ -1563,11 +1651,36 @@ function renderAllenamentiLista(content, r) {
   `;
   document.getElementById("btn-torna-raduno-da-allenamenti").onclick = () => { raduniSezione = "dettaglio"; render(); };
   document.getElementById("btn-nuovo-allenamento").onclick = () => { allenamentoCorrenteId = null; allenamentiVista = "form"; render(); };
+  document.getElementById("input-importa-allenamento").onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await importaAllenamentoExcel(file, r);
+    } catch (err) {
+      console.error(err);
+      alert("Non sono riuscito a importare questo file: " + err.message);
+    }
+    e.target.value = "";
+  };
   content.querySelectorAll("[data-apri-allenamento]").forEach(el => {
     el.onclick = () => { allenamentoCorrenteId = el.dataset.apriAllenamento; allenamentiVista = "form"; render(); };
   });
   content.querySelectorAll("[data-elimina-allenamento]").forEach(el => {
     el.onclick = (ev) => { ev.stopPropagation(); eliminaAllenamento(r, el.dataset.eliminaAllenamento); };
+  });
+  content.querySelectorAll("[data-esporta-allenamento]").forEach(el => {
+    el.onclick = (ev) => {
+      ev.stopPropagation();
+      const al = (r.allenamenti || []).find(x => x.id === el.dataset.esportaAllenamento);
+      if (al) esportaAllenamentoExcel(al, r);
+    };
+  });
+  content.querySelectorAll("[data-stampa-allenamento]").forEach(el => {
+    el.onclick = (ev) => {
+      ev.stopPropagation();
+      const al = (r.allenamenti || []).find(x => x.id === el.dataset.stampaAllenamento);
+      if (al) stampaAllenamento(al, r);
+    };
   });
 }
 
@@ -1577,7 +1690,11 @@ function allenamentoCardHTML(al) {
     <div class="candidato-card" data-apri-allenamento="${esc(al.id)}" style="cursor:pointer;">
       <div class="candidato-card-header">
         <strong>${al.numeroSessione ? esc(al.numeroSessione) : "Allenamento"}${al.data ? " — " + formatDataIt(al.data) : ""}</strong>
-        <button class="btn btn-ghost btn-sm" data-elimina-allenamento="${esc(al.id)}">Elimina</button>
+        <div class="import-actions">
+          <button class="btn btn-ghost btn-sm" data-esporta-allenamento="${esc(al.id)}">Esporta Excel</button>
+          <button class="btn btn-ghost btn-sm" data-stampa-allenamento="${esc(al.id)}">Stampa</button>
+          <button class="btn btn-ghost btn-sm" data-elimina-allenamento="${esc(al.id)}">Elimina</button>
+        </div>
       </div>
       <p class="muted" style="font-size:12.5px; margin:4px 0 0;">
         ${[al.categoria, al.mdOffset, al.luogo].filter(Boolean).map(v => esc(v)).join(" · ")}
@@ -1672,9 +1789,9 @@ function renderAllenamentoForm(content, r) {
 
   const blocchiContainer = document.getElementById("blocchi-container");
   if (al && al.blocchi && al.blocchi.length) {
-    al.blocchi.forEach(b => blocchiContainer.appendChild(creaBloccoAllenamento(b)));
+    al.blocchi.forEach(b => blocchiContainer.appendChild(creaBloccoAllenamento(b, r)));
   }
-  document.getElementById("btn-aggiungi-blocco").onclick = () => blocchiContainer.appendChild(creaBloccoAllenamento());
+  document.getElementById("btn-aggiungi-blocco").onclick = () => blocchiContainer.appendChild(creaBloccoAllenamento(null, r));
 
   const annulla = () => { allenamentiVista = "lista"; allenamentoCorrenteId = null; render(); };
   document.getElementById("btn-annulla-allenamento-top").onclick = annulla;
@@ -1682,13 +1799,24 @@ function renderAllenamentoForm(content, r) {
   document.getElementById("btn-salva-allenamento").onclick = () => salvaAllenamentoDaForm(r, al);
 }
 
-function creaBloccoAllenamento(blocco) {
+function creaBloccoAllenamento(blocco, r) {
   blocco = blocco || {};
   const div = document.createElement("div");
   div.className = "candidato-card blocco-allenamento-row";
   div.dataset.blocId = blocco.id || uid();
   let immagineBlocco = blocco.immagine || "";
+  // Copia di lavoro del piazzamento di QUESTO blocco: [{ x, y, colore, giocatoreId|null }],
+  // x/y in percentuale (0-100) rispetto al campetto, così restano validi a
+  // qualunque dimensione venga mostrato il campetto (schermo o stampa).
+  let posizionamento = (blocco.posizionamento || []).map(m => ({ ...m }));
+  let coloreCorrente = "rosso";
   const eserciziOrdinati = esercizi.slice().sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
+  // Rosa del raduno (per poter etichettare un segnaposto con un giocatore
+  // vero, invece di un semplice pallino colorato senza nome).
+  const rosaGiocatori = ((r && r.rosa) || [])
+    .map(v => players.find(p => p.id === v.giocatoreId))
+    .filter(Boolean)
+    .sort((a, b) => (a.cognome || "").localeCompare(b.cognome || "", "it") || (a.nome || "").localeCompare(b.nome || "", "it"));
   div.innerHTML = `
     <div class="candidato-card-header">
       <input type="text" class="ba-numero" placeholder="N. (es. 1, 2, 3.a)" style="max-width:130px;" value="${esc(blocco.numero || "")}">
@@ -1725,6 +1853,26 @@ function creaBloccoAllenamento(blocco) {
         <label class="btn btn-ghost btn-sm file-label">Carica foto/schema<input type="file" class="ba-immagine-input" accept="image/*"></label>
         <button type="button" class="btn btn-ghost btn-sm ba-rimuovi-immagine" style="display:${immagineBlocco ? "inline-flex" : "none"}">Rimuovi immagine</button>
       </div>
+    </div>
+    <div class="piazzamento-wrap">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <strong style="font-size:13px;">Piazzamento giocatori sul campetto</strong>
+        <div class="colori-palette" style="display:flex; gap:8px; align-items:center;">
+          ${COLORI_PIAZZAMENTO.map((c, i) => `<button type="button" class="colore-swatch colore-swatch-${c.chiave} ${i === 0 ? "selezionato" : ""}" data-colore="${c.chiave}" title="${esc(c.nome)}"></button>`).join("")}
+        </div>
+      </div>
+      <label style="margin-top:8px; display:block;">Giocatore da piazzare <span class="muted" style="font-weight:400;">(opzionale — clic sul campetto per posizionare)</span>
+        <select class="ba-player-select">
+          <option value="">— solo colore, nessun nome —</option>
+          ${rosaGiocatori.map(p => `<option value="${esc(p.id)}">${esc(p.cognome)} ${esc(p.nome)}</option>`).join("")}
+        </select>
+      </label>
+      <div class="mini-pitch">
+        <div class="mini-pitch-area-sx"></div>
+        <div class="mini-pitch-area-dx"></div>
+        <div class="mini-pitch-markers"></div>
+      </div>
+      <p class="muted" style="font-size:11.5px; margin-top:4px;">Clic sul campetto per posizionare un giocatore col colore scelto sopra. Trascina un pallino per spostarlo, clic singolo senza trascinare per rimuoverlo.</p>
     </div>
   `;
   div.querySelector(".btn-remove-row").onclick = () => div.remove();
@@ -1764,6 +1912,82 @@ function creaBloccoAllenamento(blocco) {
   // perché ogni blocco ha la propria closure indipendente, e al salvataggio
   // dobbiamo poter rileggere l'immagine di CIASCUN blocco presente nel DOM.
   div.leggiImmagineBlocco = () => immagineBlocco;
+
+  // ---- Piazzamento colorato giocatori sul campetto ----
+  const pitchEl = div.querySelector(".mini-pitch");
+  const markersWrap = div.querySelector(".mini-pitch-markers");
+  const playerSelect = div.querySelector(".ba-player-select");
+
+  function renderMarkers() {
+    markersWrap.innerHTML = posizionamento.map((m, i) => {
+      const p = m.giocatoreId ? players.find(x => x.id === m.giocatoreId) : null;
+      const etichetta = p ? (p.cognome || "").slice(0, 3).toUpperCase() : "";
+      const titolo = p ? `${p.cognome} ${p.nome}` : "Segnaposto senza nome";
+      return `<div class="pitch-marker marker-${esc(m.colore)}" data-idx="${i}" style="left:${m.x}%; top:${m.y}%;" title="${esc(titolo)}">${esc(etichetta)}</div>`;
+    }).join("");
+    markersWrap.querySelectorAll(".pitch-marker").forEach(attaccaTrascinamento);
+  }
+
+  function coordinatePercentuali(ev) {
+    const rect = pitchEl.getBoundingClientRect();
+    const x = Math.min(97, Math.max(3, ((ev.clientX - rect.left) / rect.width) * 100));
+    const y = Math.min(95, Math.max(5, ((ev.clientY - rect.top) / rect.height) * 100));
+    return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+  }
+
+  function attaccaTrascinamento(el) {
+    let trascinando = false;
+    let spostato = false;
+    el.addEventListener("pointerdown", (ev) => {
+      ev.stopPropagation();
+      trascinando = true;
+      spostato = false;
+      el.setPointerCapture(ev.pointerId);
+    });
+    el.addEventListener("pointermove", (ev) => {
+      if (!trascinando) return;
+      spostato = true;
+      const { x, y } = coordinatePercentuali(ev);
+      const idx = Number(el.dataset.idx);
+      if (posizionamento[idx]) {
+        posizionamento[idx].x = x;
+        posizionamento[idx].y = y;
+        el.style.left = x + "%";
+        el.style.top = y + "%";
+      }
+    });
+    const fine = (ev) => {
+      ev.stopPropagation();
+      if (!trascinando) return;
+      trascinando = false;
+      if (!spostato) {
+        // Clic senza trascinamento: rimuove il segnaposto.
+        const idx = Number(el.dataset.idx);
+        posizionamento.splice(idx, 1);
+        renderMarkers();
+      }
+    };
+    el.addEventListener("pointerup", fine);
+    el.addEventListener("pointercancel", fine);
+  }
+
+  pitchEl.addEventListener("click", (ev) => {
+    if (ev.target.closest(".pitch-marker")) return;
+    const { x, y } = coordinatePercentuali(ev);
+    posizionamento.push({ colore: coloreCorrente, x, y, giocatoreId: playerSelect.value || null });
+    renderMarkers();
+  });
+
+  div.querySelectorAll(".colore-swatch").forEach(btn => {
+    btn.onclick = () => {
+      coloreCorrente = btn.dataset.colore;
+      div.querySelectorAll(".colore-swatch").forEach(b => b.classList.remove("selezionato"));
+      btn.classList.add("selezionato");
+    };
+  });
+
+  renderMarkers();
+  div.leggiPosizionamento = () => posizionamento;
   return div;
 }
 
@@ -1788,9 +2012,7 @@ function salvaAllenamentoDaForm(r, vecchioAllenamento) {
     dimensioni: div.querySelector(".ba-dimensioni").value.trim(),
     descrizione: div.querySelector(".ba-descrizione").value.trim(),
     immagine: div.leggiImmagineBlocco ? div.leggiImmagineBlocco() : "",
-    // Riservato per il prossimo incremento (piazzamento colorato dei
-    // giocatori sul campetto di questo blocco) — vedi commento più sopra.
-    posizionamento: [],
+    posizionamento: div.leggiPosizionamento ? div.leggiPosizionamento() : [],
   }));
 
   const allenamento = {
@@ -1822,6 +2044,253 @@ function salvaAllenamentoDaForm(r, vecchioAllenamento) {
   allenamentoCorrenteId = allenamento.id;
   allenamentiVista = "lista";
   render();
+}
+
+// ===================== Allenamenti: Excel export/import e stampa =====================
+// Formato scelto per l'export: NON una replica pixel-per-pixel del template
+// Excel originale di Mo (impossibile con la libreria gratuita usata
+// nell'app, che non scrive colori di sfondo — limite già segnalato), ma una
+// tabella dati pulita e completa, organizzata in 3 fogli leggibili sia da
+// persona che da programma: così lo stesso file può essere sia consultato a
+// mano sia reimportato in app senza perdere nulla (incluso il piazzamento
+// colorato dei giocatori sui campetti).
+function esportaAllenamentoExcel(al, r) {
+  const schedaRighe = [
+    ["Campo", "Valore"],
+    ["Sessione", al.numeroSessione || ""],
+    ["Data", al.data || ""],
+    ["Categoria", al.categoria || ""],
+    ["MD", al.mdOffset || ""],
+    ["Data partita di riferimento", al.kickoffData || ""],
+    ["Ora partita", al.kickoffOra || ""],
+    ["Luogo", al.luogo || ""],
+    ["Note", al.note || ""],
+    ["Raduno", r.nome || ""],
+    [],
+    ["PLAYERS AVAILABLE"],
+    ...PLAYERS_AVAILABLE_CAMPI.map(c => [c.label, (al.playersAvailable && al.playersAvailable[c.chiave] != null) ? al.playersAvailable[c.chiave] : ""]),
+    [],
+    ["GPS PARAMETERS"],
+    ...GPS_CAMPI.map(c => [c.label, (al.gps && al.gps[c.chiave] != null) ? al.gps[c.chiave] : ""]),
+  ];
+
+  const eserciziRighe = [
+    ["Numero", "Esercizio Eserciziario", "Titolo", "Training Load", "Tempo (min)", "Dimensioni", "Descrizione"],
+    ...(al.blocchi || []).map(b => {
+      const es = b.esercizioId ? esercizi.find(x => x.id === b.esercizioId) : null;
+      return [b.numero || "", es ? es.nome : "", b.titolo || "", b.caricoTesto || "", b.tempoMinuti || "", b.dimensioni || "", b.descrizione || ""];
+    }),
+  ];
+
+  const piazzamentiRighe = [
+    ["Blocco (numero)", "Colore", "X (%)", "Y (%)", "Giocatore"],
+    ...(al.blocchi || []).flatMap(b => (b.posizionamento || []).map(m => {
+      const p = m.giocatoreId ? players.find(x => x.id === m.giocatoreId) : null;
+      return [b.numero || "", m.colore || "", m.x, m.y, p ? `${p.cognome} ${p.nome}` : ""];
+    })),
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(schedaRighe), "Scheda");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(eserciziRighe), "Esercizi");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(piazzamentiRighe), "Piazzamenti");
+
+  const slug = (al.numeroSessione || "allenamento").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  XLSX.writeFile(wb, `allenamento-${slug || "sessione"}-${al.data || dataOggiLocale()}.xlsx`);
+}
+
+// Rilegge un file generato da esportaAllenamentoExcel (o comunque con gli
+// stessi 3 fogli/intestazioni) e crea un NUOVO allenamento nel raduno con
+// tutti i dati, blocchi e piazzamenti. Il collegamento a un esercizio
+// dell'Eserciziario e il collegamento di un segnaposto a un giocatore vero
+// vengono ritrovati per nome (se cambiato nel frattempo il nome in
+// Eserciziario/Elenco Giocatori, quel collegamento specifico si perde ma il
+// resto del dato — testo, immagine no, colore, posizione — resta intatto).
+async function importaAllenamentoExcel(file, r) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const wsScheda = wb.Sheets["Scheda"];
+  const wsEsercizi = wb.Sheets["Esercizi"];
+  const wsPiazzamenti = wb.Sheets["Piazzamenti"];
+  if (!wsScheda) {
+    alert("Questo file non sembra un export di un allenamento fatto da questa app (manca il foglio \"Scheda\"). Puoi importare qui solo file esportati con il bottone \"Esporta Excel\" di un allenamento.");
+    return;
+  }
+
+  const righeScheda = XLSX.utils.sheet_to_json(wsScheda, { header: 1, defval: "" });
+  const valorePer = (etichetta) => {
+    const riga = righeScheda.find(rr => String(rr[0] || "").trim().toLowerCase() === etichetta.toLowerCase());
+    return riga ? String(riga[1] || "").trim() : "";
+  };
+
+  const playersAvailable = {};
+  PLAYERS_AVAILABLE_CAMPI.forEach(c => {
+    const v = valorePer(c.label);
+    if (v !== "") playersAvailable[c.chiave] = parseInt(v, 10);
+  });
+  const gps = {};
+  GPS_CAMPI.forEach(c => {
+    const v = valorePer(c.label);
+    if (v !== "") gps[c.chiave] = v;
+  });
+
+  const blocchi = [];
+  if (wsEsercizi) {
+    const righeEsercizi = XLSX.utils.sheet_to_json(wsEsercizi, { header: 1, defval: "" }).slice(1);
+    righeEsercizi.forEach(rr => {
+      if (!rr.some(v => String(v || "").trim() !== "")) return; // riga vuota
+      const [numero, nomeEsercizio, titolo, carico, tempo, dimensioni, descrizione] = rr;
+      const es = nomeEsercizio ? esercizi.find(x => (x.nome || "").trim().toLowerCase() === String(nomeEsercizio).trim().toLowerCase()) : null;
+      blocchi.push({
+        id: uid(),
+        numero: String(numero || "").trim(),
+        esercizioId: es ? es.id : null,
+        titolo: String(titolo || "").trim(),
+        caricoTesto: String(carico || "").trim(),
+        tempoMinuti: String(tempo || "").trim(),
+        dimensioni: String(dimensioni || "").trim(),
+        descrizione: String(descrizione || "").trim(),
+        immagine: "",
+        posizionamento: [],
+      });
+    });
+  }
+
+  if (wsPiazzamenti) {
+    const righePiazzamenti = XLSX.utils.sheet_to_json(wsPiazzamenti, { header: 1, defval: "" }).slice(1);
+    righePiazzamenti.forEach(rr => {
+      if (!rr.some(v => String(v || "").trim() !== "")) return;
+      const [numeroBlocco, colore, x, y, nomeGiocatore] = rr;
+      const blocco = blocchi.find(b => b.numero === String(numeroBlocco || "").trim());
+      if (!blocco) return;
+      let giocatoreId = null;
+      if (nomeGiocatore) {
+        const nomeCercato = String(nomeGiocatore).trim().toLowerCase();
+        const p = players.find(pl => `${pl.cognome} ${pl.nome}`.trim().toLowerCase() === nomeCercato);
+        if (p) giocatoreId = p.id;
+      }
+      const coloreValido = COLORI_PIAZZAMENTO.some(c => c.chiave === colore) ? colore : "rosso";
+      blocco.posizionamento.push({ colore: coloreValido, x: parseFloat(x) || 50, y: parseFloat(y) || 50, giocatoreId });
+    });
+  }
+
+  const allenamento = {
+    id: uid(),
+    creatoIl: new Date().toISOString(),
+    modificatoIl: new Date().toISOString(),
+    numeroSessione: valorePer("Sessione"),
+    data: valorePer("Data"),
+    categoria: valorePer("Categoria"),
+    mdOffset: valorePer("MD"),
+    kickoffData: valorePer("Data partita di riferimento"),
+    kickoffOra: valorePer("Ora partita"),
+    luogo: valorePer("Luogo"),
+    note: valorePer("Note"),
+    playersAvailable,
+    gps,
+    blocchi,
+  };
+
+  r.allenamenti = r.allenamenti || [];
+  r.allenamenti.push(allenamento);
+  savePlayers();
+  allenamentoCorrenteId = allenamento.id;
+  allenamentiVista = "form";
+  render();
+}
+
+// Apre una finestra di stampa con due "pagine": la scheda dati della
+// sessione (intestazione, players available, GPS, elenco blocchi con
+// eventuale foto/schema) e, di seguito, un campetto stampabile per ciascun
+// blocco con i segnaposto colorati piazzati — ricrea graficamente il
+// piazzamento fatto a schermo, dato che è un elemento interattivo (DOM) e
+// non un'immagine.
+function stampaAllenamento(al, r) {
+  const pa = al.playersAvailable || {};
+  const gps = al.gps || {};
+  const rigaCampi = (campi, dati) => campi
+    .filter(c => dati[c.chiave] != null && dati[c.chiave] !== "")
+    .map(c => `<div class="stampa-campo"><span class="stampa-campo-label">${esc(c.label)}</span><span class="stampa-campo-valore">${esc(dati[c.chiave])}</span></div>`)
+    .join("");
+
+  const blocchiHTML = (al.blocchi || []).map(b => `
+    <div class="stampa-blocco">
+      <h3>${b.numero ? esc(b.numero) + " — " : ""}${esc(b.titolo || "Esercizio")}</h3>
+      <p class="stampa-blocco-meta">
+        ${b.caricoTesto ? `Training Load: ${esc(b.caricoTesto)}` : ""}
+        ${b.tempoMinuti ? ` · Tempo: ${esc(b.tempoMinuti)}'` : ""}
+        ${b.dimensioni ? ` · ${esc(b.dimensioni)}` : ""}
+      </p>
+      ${b.immagine ? `<img class="stampa-blocco-img" src="${esc(b.immagine)}" alt="">` : ""}
+      ${b.descrizione ? `<p class="stampa-blocco-descrizione">${esc(b.descrizione).replace(/\n/g, "<br>")}</p>` : ""}
+    </div>
+  `).join("");
+
+  const campettiHTML = (al.blocchi || []).filter(b => (b.posizionamento || []).length).map(b => `
+    <div class="stampa-campetto-wrap">
+      <h3>${b.numero ? esc(b.numero) + " — " : ""}${esc(b.titolo || "Esercizio")}</h3>
+      <div class="stampa-campetto">
+        ${(b.posizionamento || []).map(m => {
+          const p = m.giocatoreId ? players.find(x => x.id === m.giocatoreId) : null;
+          const etichetta = p ? esc((p.cognome || "").slice(0, 3).toUpperCase()) : "";
+          const col = coloreePiazzamento(m.colore).css;
+          return `<div class="stampa-marker" style="left:${m.x}%; top:${m.y}%; background:${col};">${etichetta}</div>`;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+
+  const html = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8">
+    <title>Allenamento ${esc(al.numeroSessione || "")} — ${esc(r.nome || "")}</title>
+    <style>
+      body{ font-family: -apple-system, Arial, sans-serif; color:#111; margin:24px; }
+      h1{ font-size:20px; margin-bottom:2px; }
+      h2{ font-size:15px; margin-top:26px; border-bottom:1px solid #999; padding-bottom:4px; }
+      h3{ font-size:13.5px; margin:14px 0 4px; }
+      .stampa-sottotitolo{ color:#555; font-size:12.5px; margin-bottom:14px; }
+      .stampa-campi-grid{ display:flex; flex-wrap:wrap; gap:10px 26px; margin-bottom:6px; }
+      .stampa-campo{ font-size:12.5px; display:flex; gap:5px; }
+      .stampa-campo-label{ color:#555; }
+      .stampa-campo-valore{ font-weight:600; }
+      .stampa-blocco{ break-inside: avoid; margin-bottom:16px; padding-bottom:10px; border-bottom:1px dashed #ccc; }
+      .stampa-blocco-meta{ font-size:12px; color:#555; margin:2px 0 6px; }
+      .stampa-blocco-img{ max-width:340px; max-height:220px; display:block; margin:6px 0; border:1px solid #ccc; }
+      .stampa-blocco-descrizione{ font-size:12.5px; white-space:pre-wrap; }
+      .stampa-campetto-wrap{ break-inside: avoid; margin-bottom:22px; }
+      .stampa-campetto{
+        position:relative; width:100%; max-width:520px; aspect-ratio:3/2;
+        background: repeating-linear-gradient(90deg, #bfe3c8 0, #bfe3c8 40px, #aedcbb 40px, #aedcbb 80px);
+        border:2px solid #333; border-radius:4px;
+      }
+      .stampa-marker{
+        position:absolute; width:24px; height:24px; border-radius:50%;
+        transform: translate(-50%,-50%); border:1.5px solid rgba(0,0,0,0.55);
+        display:flex; align-items:center; justify-content:center;
+        font-size:9px; font-weight:700; color:#111;
+      }
+      @media print{ .stampa-pagina{ page-break-after: always; } .stampa-pagina:last-child{ page-break-after: auto; } }
+    </style>
+  </head><body>
+    <div class="stampa-pagina">
+      <h1>Allenamento ${esc(al.numeroSessione || "")}</h1>
+      <p class="stampa-sottotitolo">${esc(r.nome || "")}${al.categoria ? " — " + esc(al.categoria) : ""}${al.data ? " — " + formatDataIt(al.data) : ""}${al.mdOffset ? " — " + esc(al.mdOffset) : ""}${al.luogo ? " — " + esc(al.luogo) : ""}</p>
+      ${al.note ? `<p class="stampa-blocco-descrizione">${esc(al.note)}</p>` : ""}
+      <h2>Players available</h2>
+      <div class="stampa-campi-grid">${rigaCampi(PLAYERS_AVAILABLE_CAMPI, pa) || "<span class='stampa-sottotitolo'>Nessun dato inserito.</span>"}</div>
+      <h2>GPS parameters</h2>
+      <div class="stampa-campi-grid">${rigaCampi(GPS_CAMPI, gps) || "<span class='stampa-sottotitolo'>Nessun dato inserito.</span>"}</div>
+      <h2>Esercizi della sessione</h2>
+      ${blocchiHTML || "<p class='stampa-sottotitolo'>Nessun blocco esercizio.</p>"}
+    </div>
+    ${campettiHTML ? `<div class="stampa-pagina"><h2>Piazzamento giocatori sui campetti</h2>${campettiHTML}</div>` : ""}
+  </body></html>`;
+
+  const finestra = window.open("", "_blank");
+  if (!finestra) { alert("Il browser ha bloccato l'apertura della finestra di stampa: consenti i popup per questo sito e riprova."); return; }
+  finestra.document.write(html);
+  finestra.document.close();
+  finestra.focus();
+  setTimeout(() => { finestra.print(); }, 300);
 }
 
 // Rimuove SOLO un token di categoria età (U21, U-21, M15, ecc.) da un testo,
