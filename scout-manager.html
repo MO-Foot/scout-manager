@@ -512,6 +512,10 @@ body{
 .tabella-giocatori tr[data-id]{ cursor: pointer; }
 .tabella-giocatori tr[data-id]:hover td{ background: var(--surface-2); }
 .tabella-giocatori .etichetta-badge{ margin: 2px 3px 2px 0; display: inline-block; }
+.tabella-giocatori th[data-ordina]{ cursor: pointer; user-select: none; }
+.tabella-giocatori th[data-ordina]:hover{ color: var(--chalk); }
+.tabella-giocatori th[data-ordina].th-ordinamento-attivo{ color: var(--gold); }
+.tabella-giocatori th[data-ordina] .th-freccia{ margin-left: 3px; font-size: 10px; }
 
 .presenze-lista{ display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
 .presenze-settimana{
@@ -1337,7 +1341,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 09:32</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 10:05</div>
         </div>
       </div>
     </header>
@@ -3592,10 +3596,14 @@ function renderElenco(content) {
       <input type="number" id="f-valoremin" class="f-input f-small" placeholder="Voto min." step="0.1" min="0" max="10" value="${esc(filtroValoreMin)}" ${filtroParametro === "tutti" ? "disabled" : ""}>
       <select id="f-ordine" class="f-input">
         <option value="cognome" ${ordinamento === "cognome" ? "selected" : ""}>Ordina: Cognome A-Z</option>
+        <option value="nome" ${ordinamento === "nome" ? "selected" : ""}>Ordina: Nome A-Z</option>
         <option value="ruolo" ${ordinamento === "ruolo" ? "selected" : ""}>Ordina: Per ruolo</option>
         <option value="ultimaPartita" ${ordinamento === "ultimaPartita" ? "selected" : ""}>Ordina: Ultima partita giocata</option>
         <option value="squadra" ${ordinamento === "squadra" ? "selected" : ""}>Ordina: Squadra A-Z</option>
         <option value="annata" ${ordinamento === "annata" ? "selected" : ""}>Ordina: Annata</option>
+        <option value="dataNascitaAsc" ${ordinamento === "dataNascitaAsc" ? "selected" : ""}>Ordina: Data di nascita (dal più vecchio)</option>
+        <option value="categoria" ${ordinamento === "categoria" ? "selected" : ""}>Ordina: Categoria (dal più giovane)</option>
+        <option value="bioalter" ${ordinamento === "bioalter" ? "selected" : ""}>Ordina: BioAlter (dal più giovane)</option>
         <option value="visionatura" ${ordinamento === "visionatura" ? "selected" : ""}>Ordina: Ultima visionatura</option>
         <option value="valutazione" ${ordinamento === "valutazione" ? "selected" : ""}>Ordina: Valutazione media</option>
         <option value="recenti" ${ordinamento === "recenti" ? "selected" : ""}>Ordina: Ultimi caricati</option>
@@ -3764,6 +3772,41 @@ function renderRisultati() {
       if (aa !== ab) return aa - ab;
       return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
     }
+    if (ordinamento === "dataNascitaAsc") {
+      // Dal più vecchio al più giovane: data di nascita completa (non solo
+      // l'anno) in ordine crescente — chi non ha una data va in fondo.
+      const da = a.dataNascita ? new Date(a.dataNascita).getTime() : Infinity;
+      const db = b.dataNascita ? new Date(b.dataNascita).getTime() : Infinity;
+      if (da !== db) return da - db;
+      return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
+    }
+    if (ordinamento === "categoria") {
+      // Dal più giovane (U14/U15...) al più "vecchio": chi non rientra in
+      // nessuna categoria U15-U21 (tipicamente Prima Squadra, o comunque
+      // fuori da quella fascia) va in fondo, come richiesto.
+      const catNum = p => {
+        const c = categoriaNazionale(p.dataNascita);
+        const n = c ? parseInt(c.replace("U", ""), 10) : NaN;
+        return isNaN(n) ? Infinity : n;
+      };
+      const ca = catNum(a), cb = catNum(b);
+      if (ca !== cb) return ca - cb; // numero crescente = dal più giovane (U14) al più vecchio (U21, poi chi non rientra in nessuna categoria)
+      return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
+    }
+    if (ordinamento === "bioalter") {
+      // Dal più giovane al più vecchio: chi non ha un valore BioAlter
+      // registrato va in fondo.
+      const ba = (a.etaBiologica !== undefined && a.etaBiologica !== null && a.etaBiologica !== "") ? parseFloat(a.etaBiologica) : Infinity;
+      const bb = (b.etaBiologica !== undefined && b.etaBiologica !== null && b.etaBiologica !== "") ? parseFloat(b.etaBiologica) : Infinity;
+      const va = isNaN(ba) ? Infinity : ba;
+      const vb = isNaN(bb) ? Infinity : bb;
+      if (va !== vb) return va - vb;
+      return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
+    }
+    if (ordinamento === "nome") {
+      const na = `${a.nome || ""} ${a.cognome || ""}`.localeCompare(`${b.nome || ""} ${b.cognome || ""}`);
+      return na;
+    }
     return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
   });
 
@@ -3789,7 +3832,7 @@ function renderRisultati() {
       <table class="tabella-giocatori">
         <thead>
           <tr>
-            <th>Foto</th><th>Media</th><th>Cognome</th><th>Nome</th><th>Data di nascita</th><th>Categoria</th><th>BioAlter</th><th>Ruolo</th><th>Club</th><th>Etichette</th>${ordinamento === "modificati" ? `<th>Modificato</th>` : ""}${ordinamento === "ultimaPartita" ? `<th>Ultima partita</th>` : ""}
+            <th>Foto</th>${thOrdinabile("Media", "valutazione")}${thOrdinabile("Cognome", "cognome")}${thOrdinabile("Nome", "nome")}${thOrdinabile("Data di nascita", "dataNascitaAsc")}${thOrdinabile("Categoria", "categoria")}${thOrdinabile("BioAlter", "bioalter")}${thOrdinabile("Ruolo", "ruolo")}${thOrdinabile("Club", "squadra")}<th>Etichette</th>${ordinamento === "modificati" ? `<th>Modificato</th>` : ""}${ordinamento === "ultimaPartita" ? `<th>Ultima partita</th>` : ""}
           </tr>
         </thead>
         <tbody>
@@ -3809,6 +3852,14 @@ function renderRisultati() {
         apriDettaglio(el.dataset.id);
       };
     });
+    container.querySelectorAll("th[data-ordina]").forEach(th => {
+      th.onclick = () => {
+        ordinamento = th.dataset.ordina;
+        const selOrdine = document.getElementById("f-ordine");
+        if (selOrdine) selOrdine.value = ordinamento; // resta sincronizzato col menu a tendina
+        renderRisultati();
+      };
+    });
     return;
   }
 
@@ -3817,6 +3868,15 @@ function renderRisultati() {
   container.querySelectorAll(".player-card").forEach(el => {
     el.onclick = () => apriDettaglio(el.dataset.id);
   });
+}
+
+// Intestazione di colonna cliccabile per ordinare l'elenco (vista tabella):
+// mostra una freccina quando è la colonna attiva. Il clic imposta lo stesso
+// "ordinamento" globale usato dal menu a tendina "Ordina" — restano quindi
+// sempre sincronizzati e utilizzabili entrambi indifferentemente.
+function thOrdinabile(etichetta, valoreOrdinamento) {
+  const attivo = ordinamento === valoreOrdinamento;
+  return `<th data-ordina="${esc(valoreOrdinamento)}" class="${attivo ? "th-ordinamento-attivo" : ""}">${esc(etichetta)}${attivo ? `<span class="th-freccia">▾</span>` : ""}</th>`;
 }
 
 function tabellaRigaHTML(p, scoutFilter) {
