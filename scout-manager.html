@@ -1341,7 +1341,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 10:05</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 10:30</div>
         </div>
       </div>
     </header>
@@ -1896,6 +1896,11 @@ let filtroRuolo = "tutti";
 let filtroParametro = "tutti";
 let filtroValoreMin = "";
 let ordinamento = "cognome";
+// 1 = ordine "canonico" di ogni criterio (quello descritto nel menu a
+// tendina, es. "dal più vecchio"), -1 = ordine invertito. Si inverte
+// ricliccando la stessa intestazione di colonna nella vista tabella; scegliere
+// un nuovo criterio (da intestazione o da tendina) lo riporta a 1.
+let direzioneOrdinamento = 1;
 let vistaElenco = "schede";
 let giocatoriFiltratiCorrente = [];
 let filtroEtichette = new Set();
@@ -3657,7 +3662,7 @@ function renderElenco(content) {
     renderRisultati();
   };
   document.getElementById("f-valoremin").oninput = e => { filtroValoreMin = e.target.value; renderRisultati(); };
-  document.getElementById("f-ordine").onchange = e => { ordinamento = e.target.value; renderRisultati(); };
+  document.getElementById("f-ordine").onchange = e => { ordinamento = e.target.value; direzioneOrdinamento = 1; renderRisultati(); };
   document.getElementById("btn-reset-filtri").onclick = () => {
     filtroTesto = ""; filtroAnno = "tutti"; filtroSquadra = "tutte"; filtroCategoria = "tutte";
     filtroRuolo = "tutti"; filtroParametro = "tutti"; filtroValoreMin = ""; ordinamento = "cognome";
@@ -3728,7 +3733,78 @@ function renderRisultati() {
     return true;
   });
 
-  filtered.sort((a, b) => {
+  filtered.sort((a, b) => comparaGiocatoriPerOrdinamento(a, b) * direzioneOrdinamento);
+
+  // Reso disponibile globalmente per lo strumento "Report", che lavora
+  // sempre sull'elenco così com'è filtrato/ordinato in questo momento.
+  giocatoriFiltratiCorrente = filtered;
+
+  const filtroScoutAttivo = filtroScouts.size > 0;
+  meta.textContent = `${filtered.length} giocator${filtered.length === 1 ? "e" : "i"} su ${players.length}` + (filtroScoutAttivo ? " · media calcolata solo sugli scout selezionati" : "");
+
+  if (!filtered.length) {
+    container.className = "risultati-container";
+    container.innerHTML = `<div class="empty-state">
+      <p>Nessun giocatore trovato con questi filtri.</p>
+      <p class="empty-sub">Prova ad azzerare i filtri o aggiungi una nuova scheda.</p>
+    </div>`;
+    return;
+  }
+
+  if (vistaElenco === "tabella") {
+    container.className = "risultati-container risultati-tabella-wrap";
+    container.innerHTML = `
+      <table class="tabella-giocatori">
+        <thead>
+          <tr>
+            <th>Foto</th>${thOrdinabile("Media", "valutazione")}${thOrdinabile("Cognome", "cognome")}${thOrdinabile("Nome", "nome")}${thOrdinabile("Data di nascita", "dataNascitaAsc")}${thOrdinabile("Categoria", "categoria")}${thOrdinabile("BioAlter", "bioalter")}${thOrdinabile("Ruolo", "ruolo")}${thOrdinabile("Club", "squadra")}<th>Etichette</th>${ordinamento === "modificati" ? `<th>Modificato</th>` : ""}${ordinamento === "ultimaPartita" ? `<th>Ultima partita</th>` : ""}
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map(p => tabellaRigaHTML(p, filtroScouts)).join("")}
+        </tbody>
+      </table>
+    `;
+    container.querySelectorAll("tr[data-id]").forEach(el => {
+      el.onclick = e => {
+        const fotoEl = e.target.closest("[data-foto-ingrandisci]");
+        if (fotoEl) {
+          e.stopPropagation();
+          const p = players.find(pl => pl.id === fotoEl.dataset.fotoIngrandisci);
+          if (p && p.foto) apriFotoIngrandita(p.foto);
+          return;
+        }
+        apriDettaglio(el.dataset.id);
+      };
+    });
+    container.querySelectorAll("th[data-ordina]").forEach(th => {
+      th.onclick = () => {
+        const valore = th.dataset.ordina;
+        if (ordinamento === valore) {
+          direzioneOrdinamento *= -1; // stessa colonna ricliccata: inverte l'ordine
+        } else {
+          ordinamento = valore;
+          direzioneOrdinamento = 1;
+        }
+        const selOrdine = document.getElementById("f-ordine");
+        if (selOrdine) selOrdine.value = ordinamento; // resta sincronizzato col menu a tendina
+        renderRisultati();
+      };
+    });
+    return;
+  }
+
+  container.className = "risultati-container";
+  container.innerHTML = filtered.map(p => cardHTML(p, filtroScouts)).join("");
+  container.querySelectorAll(".player-card").forEach(el => {
+    el.onclick = () => apriDettaglio(el.dataset.id);
+  });
+}
+
+// Comparatore "canonico" (prima dell'eventuale inversione data da
+// direzioneOrdinamento) per ciascun criterio del menu "Ordina" / delle
+// intestazioni di colonna cliccabili nella vista tabella.
+function comparaGiocatoriPerOrdinamento(a, b) {
     if (ordinamento === "recenti") {
       return (b.creatoIl || 0) - (a.creatoIl || 0);
     }
@@ -3808,75 +3884,17 @@ function renderRisultati() {
       return na;
     }
     return `${a.cognome || ""} ${a.nome || ""}`.localeCompare(`${b.cognome || ""} ${b.nome || ""}`);
-  });
-
-  // Reso disponibile globalmente per lo strumento "Report", che lavora
-  // sempre sull'elenco così com'è filtrato/ordinato in questo momento.
-  giocatoriFiltratiCorrente = filtered;
-
-  const filtroScoutAttivo = filtroScouts.size > 0;
-  meta.textContent = `${filtered.length} giocator${filtered.length === 1 ? "e" : "i"} su ${players.length}` + (filtroScoutAttivo ? " · media calcolata solo sugli scout selezionati" : "");
-
-  if (!filtered.length) {
-    container.className = "risultati-container";
-    container.innerHTML = `<div class="empty-state">
-      <p>Nessun giocatore trovato con questi filtri.</p>
-      <p class="empty-sub">Prova ad azzerare i filtri o aggiungi una nuova scheda.</p>
-    </div>`;
-    return;
-  }
-
-  if (vistaElenco === "tabella") {
-    container.className = "risultati-container risultati-tabella-wrap";
-    container.innerHTML = `
-      <table class="tabella-giocatori">
-        <thead>
-          <tr>
-            <th>Foto</th>${thOrdinabile("Media", "valutazione")}${thOrdinabile("Cognome", "cognome")}${thOrdinabile("Nome", "nome")}${thOrdinabile("Data di nascita", "dataNascitaAsc")}${thOrdinabile("Categoria", "categoria")}${thOrdinabile("BioAlter", "bioalter")}${thOrdinabile("Ruolo", "ruolo")}${thOrdinabile("Club", "squadra")}<th>Etichette</th>${ordinamento === "modificati" ? `<th>Modificato</th>` : ""}${ordinamento === "ultimaPartita" ? `<th>Ultima partita</th>` : ""}
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.map(p => tabellaRigaHTML(p, filtroScouts)).join("")}
-        </tbody>
-      </table>
-    `;
-    container.querySelectorAll("tr[data-id]").forEach(el => {
-      el.onclick = e => {
-        const fotoEl = e.target.closest("[data-foto-ingrandisci]");
-        if (fotoEl) {
-          e.stopPropagation();
-          const p = players.find(pl => pl.id === fotoEl.dataset.fotoIngrandisci);
-          if (p && p.foto) apriFotoIngrandita(p.foto);
-          return;
-        }
-        apriDettaglio(el.dataset.id);
-      };
-    });
-    container.querySelectorAll("th[data-ordina]").forEach(th => {
-      th.onclick = () => {
-        ordinamento = th.dataset.ordina;
-        const selOrdine = document.getElementById("f-ordine");
-        if (selOrdine) selOrdine.value = ordinamento; // resta sincronizzato col menu a tendina
-        renderRisultati();
-      };
-    });
-    return;
-  }
-
-  container.className = "risultati-container";
-  container.innerHTML = filtered.map(p => cardHTML(p, filtroScouts)).join("");
-  container.querySelectorAll(".player-card").forEach(el => {
-    el.onclick = () => apriDettaglio(el.dataset.id);
-  });
 }
 
 // Intestazione di colonna cliccabile per ordinare l'elenco (vista tabella):
-// mostra una freccina quando è la colonna attiva. Il clic imposta lo stesso
-// "ordinamento" globale usato dal menu a tendina "Ordina" — restano quindi
-// sempre sincronizzati e utilizzabili entrambi indifferentemente.
+// mostra una freccina quando è la colonna attiva (▾ = ordine "normale", ▴ =
+// invertito — si inverte ricliccando la stessa colonna). Il clic imposta lo
+// stesso "ordinamento" globale usato dal menu a tendina "Ordina" — restano
+// quindi sempre sincronizzati e utilizzabili entrambi indifferentemente.
 function thOrdinabile(etichetta, valoreOrdinamento) {
   const attivo = ordinamento === valoreOrdinamento;
-  return `<th data-ordina="${esc(valoreOrdinamento)}" class="${attivo ? "th-ordinamento-attivo" : ""}">${esc(etichetta)}${attivo ? `<span class="th-freccia">▾</span>` : ""}</th>`;
+  const freccia = direzioneOrdinamento === -1 ? "▴" : "▾";
+  return `<th data-ordina="${esc(valoreOrdinamento)}" class="${attivo ? "th-ordinamento-attivo" : ""}">${esc(etichetta)}${attivo ? `<span class="th-freccia">${freccia}</span>` : ""}</th>`;
 }
 
 function tabellaRigaHTML(p, scoutFilter) {
