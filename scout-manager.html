@@ -405,6 +405,9 @@ body{
   color: var(--chalk);
   border-bottom: 3px solid var(--gold);
 }
+.navtab-blue{ background: rgba(111,179,217,0.14); border-radius: 6px 6px 0 0; }
+.navtab-red{ background: rgba(193,85,74,0.14); border-radius: 6px 6px 0 0; }
+.navtab-grey{ background: rgba(143,163,150,0.14); border-radius: 6px 6px 0 0; }
 
 /* ---------- Buttons ---------- */
 .btn{
@@ -1334,19 +1337,18 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 29/07/2026 · 23:39</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 09:15</div>
         </div>
       </div>
     </header>
 
     <nav class="nav-tabs">
       <button class="navtab active" id="nav-elenco" type="button">Elenco Giocatori</button>
-      <button class="navtab" id="nav-nuova" type="button">Nuova Scheda</button>
       <button class="navtab" id="nav-calendario" type="button">Calendario</button>
-      <button class="navtab" id="nav-raduni" type="button">Raduni U16</button>
-      <button class="navtab" id="nav-allenatori" type="button">Allenatori</button>
-      <button class="navtab" id="nav-esercizi" type="button">Eserciziario</button>
-      <button class="navtab" id="nav-presenze" type="button">Presenze</button>
+      <button class="navtab navtab-blue" id="nav-presenze" type="button">Presenze</button>
+      <button class="navtab navtab-red" id="nav-raduni" type="button">Raduni U16</button>
+      <button class="navtab navtab-red" id="nav-esercizi" type="button">Eserciziario</button>
+      <button class="navtab navtab-grey" id="nav-allenatori" type="button">Allenatori</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
     </nav>
 
@@ -3377,7 +3379,6 @@ function renderLogo() {
 
 async function boot() {
   document.getElementById("nav-elenco").onclick = () => switchTab("elenco");
-  document.getElementById("nav-nuova").onclick = () => switchTab("nuova");
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
   document.getElementById("nav-allenatori").onclick = () => switchTab("allenatori");
@@ -3493,7 +3494,9 @@ async function boot() {
 function switchTab(tab, editPlayer) {
   currentTab = tab;
   document.querySelectorAll(".navtab").forEach(el => el.classList.remove("active"));
-  document.getElementById("nav-" + tab).classList.add("active");
+  const navAttivo = document.getElementById("nav-" + tab);
+  if (navAttivo) navAttivo.classList.add("active");
+  else document.getElementById("nav-elenco").classList.add("active"); // "nuova" non ha più un tab dedicato: resta evidenziato "Elenco Giocatori"
   render(editPlayer);
   window.scrollTo(0, 0);
 }
@@ -3621,6 +3624,7 @@ function renderElenco(content) {
         <button type="button" class="vista-toggle-btn ${vistaElenco === "schede" ? "vista-attiva" : ""}" id="btn-vista-schede">Schede</button>
         <button type="button" class="vista-toggle-btn ${vistaElenco === "tabella" ? "vista-attiva" : ""}" id="btn-vista-tabella">Elenco</button>
       </span>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-nuova-scheda">+ Nuova Scheda</button>
       <button type="button" class="btn btn-primary btn-sm" id="btn-importa-file">+ Importa file</button>
       <button type="button" class="btn btn-ghost btn-sm" id="btn-report">📄 Report</button>
     </div>
@@ -3630,6 +3634,7 @@ function renderElenco(content) {
 
   document.getElementById("btn-vista-schede").onclick = () => { vistaElenco = "schede"; renderElenco(content); };
   document.getElementById("btn-vista-tabella").onclick = () => { vistaElenco = "tabella"; renderElenco(content); };
+  document.getElementById("btn-nuova-scheda").onclick = () => switchTab("nuova");
   document.getElementById("btn-importa-file").onclick = apriModalImportazione;
   document.getElementById("btn-report").onclick = apriModalReport;
 
@@ -6956,8 +6961,14 @@ function renderPresenze(content) {
   const PRESENZA_CLASSE = { "Titolare": "rating-good", "Subentrato": "rating-mid", "Panchina (non entrato)": "rating-na", "Non convocato": "rating-low" };
 
   const settimaneHTML = settimaneOrdinate.map(([key, sett]) => {
-    const righeOrdinate = sett.righe.slice().sort((a, b) =>
-      (b.m.data || "").localeCompare(a.m.data || "") || (a.player.cognome || "").localeCompare(b.player.cognome || ""));
+    const righeOrdinate = sett.righe.slice().sort((a, b) => {
+      const minA = (a.m.minutiGiocati !== null && a.m.minutiGiocati !== undefined && a.m.minutiGiocati !== "") ? Number(a.m.minutiGiocati) : -1;
+      const minB = (b.m.minutiGiocati !== null && b.m.minutiGiocati !== undefined && b.m.minutiGiocati !== "") ? Number(b.m.minutiGiocati) : -1;
+      if (minB !== minA) return minB - minA;
+      const nomeA = `${a.player.cognome || ""} ${a.player.nome || ""}`.trim();
+      const nomeB = `${b.player.cognome || ""} ${b.player.nome || ""}`.trim();
+      return nomeA.localeCompare(nomeB);
+    });
     const giocatoriCoinvolti = new Set(sett.righe.map(r => r.player.id)).size;
     const competizioniSettimana = [...new Set(sett.righe.map(r => r.m.competizione).filter(Boolean))];
     const aperta = settimanaApertaPresenze === key;
@@ -7834,15 +7845,28 @@ const SQUADRA_STOP_WORDS = new Set(["fc", "sc", "bsc", "ac", "cs", "fco", "club"
 // categoria d'età come solo numero (es. "21" per U-21 o M-21, "15" per
 // U15/U-15) — la lettera U/M viene ignorata perché indica lo stesso livello
 // di categoria in tedesco/francese, cambia solo la lingua dell'etichetta.
+// Risultato di analizzaNomeSquadra memoizzato per stringa in ingresso: è una
+// funzione pura (stesso testo → stesso risultato) ma viene richiamata
+// moltissime volte — una volta per ogni coppia giocatore/allenatore quando si
+// cerca l'allenatore di un giocatore o i giocatori di un allenatore — quindi
+// senza cache il costo cresce rapidamente con il numero di allenatori e
+// giocatori (è la causa di un vero rallentamento riscontrato sulla scheda
+// Allenatori dopo l'aggiunta di più voci alla rubrica).
+const _cacheAnalizzaNomeSquadra = new Map();
 function analizzaNomeSquadra(raw) {
-  let t = String(raw || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const chiave = raw == null ? "" : String(raw);
+  const inCache = _cacheAnalizzaNomeSquadra.get(chiave);
+  if (inCache) return inCache;
+  let t = chiave.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   t = t.replace(/[-–—]/g, " ");
   t = t.replace(/[^\p{L}\p{N}\s]/gu, " ");
   let categoria = null;
   t = t.replace(/\b[um]\s*(\d{2})\b/g, (m, num) => { categoria = num; return " "; });
   t = t.replace(/\b(18|19|20)\d{2}\b/g, " ");
   const parole = t.split(/\s+/).map(w => w.trim()).filter(Boolean).filter(w => !SQUADRA_STOP_WORDS.has(w));
-  return { core: parole.join(" "), categoria };
+  const risultato = { core: parole.join(" "), categoria };
+  _cacheAnalizzaNomeSquadra.set(chiave, risultato);
+  return risultato;
 }
 
 // Due "nuclei" squadra sono considerati la stessa squadra se l'insieme di
@@ -9757,8 +9781,22 @@ function renderAllenatoriRisultati() {
     .filter(a => !q || `${a.nome || ""} ${a.squadra || ""}`.toLowerCase().includes(q))
     .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
 
+  // Conta i giocatori collegati a ciascun allenatore in UN solo giro su
+  // tutti i giocatori (invece di richiamare giocatoriDiAllenatore — che
+  // scorre l'intera rubrica allenatori per OGNI giocatore — una volta per
+  // ciascuna scheda allenatore mostrata: con molte voci in rubrica quel
+  // conteggio ripetuto era diventato il vero collo di bottiglia della
+  // pagina, vedi commento su analizzaNomeSquadra).
+  const conteggioGiocatoriPerAllenatore = new Map();
+  players.forEach(p => {
+    const r = allenatoreDelGiocatore(p);
+    if (r.allenatore) {
+      conteggioGiocatoriPerAllenatore.set(r.allenatore.id, (conteggioGiocatoriPerAllenatore.get(r.allenatore.id) || 0) + 1);
+    }
+  });
+
   container.innerHTML = elenco.length
-    ? elenco.map(a => allenatoreCardHTML(a)).join("")
+    ? elenco.map(a => allenatoreCardHTML(a, conteggioGiocatoriPerAllenatore.get(a.id) || 0)).join("")
     : `<p class="muted">${allenatori.length ? "Nessun allenatore corrisponde alla ricerca." : "Nessun allenatore ancora — aggiungine uno con “+ Nuovo allenatore”."}</p>`;
 
   container.querySelectorAll("[data-apri-allenatore]").forEach(el => {
@@ -9773,8 +9811,8 @@ function giocatoriDiAllenatore(allenatoreId) {
   });
 }
 
-function allenatoreCardHTML(a) {
-  const nGiocatori = giocatoriDiAllenatore(a.id).length;
+function allenatoreCardHTML(a, nGiocatori) {
+  if (nGiocatori === undefined) nGiocatori = giocatoriDiAllenatore(a.id).length; // fallback per eventuali altri chiamanti
   const nOsservazioni = (a.osservazioni || []).length;
   return `
     <div class="candidato-card" data-apri-allenatore="${esc(a.id)}" style="cursor:pointer;">
@@ -9988,7 +10026,7 @@ function renderEserciziLista(content) {
       <div class="filtri-bar" style="margin-top:14px;">
         <input type="text" id="f-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome..." value="${esc(filtroTestoEsercizi)}">
       </div>
-      <div class="chips-group" id="chips-macrocontenitori" style="margin-top:10px;">
+      <div class="chips-group" id="chips-macrocontenitori" style="margin-top:10px; margin-bottom:20px;">
         ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip ${filtroMacrocontenitori.has(m) ? "chip-active" : ""}" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
       </div>
       <div class="import-subsection" id="esercizi-container"></div>
