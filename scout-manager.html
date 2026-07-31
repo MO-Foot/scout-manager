@@ -8704,6 +8704,22 @@ const RADUNO_STATI_CON_COLORE_UFFICIALE = new Set(["kaderspieler", "pikett", "na
 function statoLegenda(chiave) {
   return RADUNO_LEGENDA.find(s => s.chiave === chiave) || null;
 }
+
+// Priorità di VISUALIZZAZIONE dentro un reparto (diversa dall'ordine di ciclo
+// dello swatch, vedi prossimoStatoLegenda): Kaderspieler in cima, poi Pikett,
+// Nachnominiert, Verletzt, Kader A. Tutto il resto (Abgesagt, Sichtung Klub,
+// Sonstiges, nessuno stato) va in coda senza un ordine preciso tra loro.
+const RADUNO_PRIORITA_ORDINE_STATO = ["kaderspieler", "pikett", "nachnominiert", "verletzt", "kadera"];
+function prioritaOrdineStato(chiave) {
+  const i = RADUNO_PRIORITA_ORDINE_STATO.indexOf(chiave);
+  return i === -1 ? RADUNO_PRIORITA_ORDINE_STATO.length : i;
+}
+// Ordina per priorità di stato mantenendo, a parità di stato, l'ordine
+// relativo che l'utente ha impostato a mano (drag&drop) in r.rosa — sort è
+// stabile, quindi basta ordinare solo per priorità.
+function ordinaPerPrioritaStato(voci) {
+  return voci.slice().sort((a, b) => prioritaOrdineStato(a.stato) - prioritaOrdineStato(b.stato));
+}
 // Cicla nessuno -> kaderspieler -> pikett -> ... -> sonstiges -> nessuno,
 // usato dal pallino colorato sul chip del giocatore.
 function prossimoStatoLegenda(statoAttuale) {
@@ -9381,10 +9397,12 @@ function radunoPopupStatoHTML(giocatoreId) {
 }
 
 function radunoRepartoHTML(r, rep) {
-  const giocatoriReparto = (r.rosa || [])
-    .filter(x => x.reparto === rep.id)
-    .map(x => ({ ...x, player: players.find(p => p.id === x.giocatoreId) }))
-    .filter(x => x.player);
+  const giocatoriReparto = ordinaPerPrioritaStato(
+    (r.rosa || [])
+      .filter(x => x.reparto === rep.id)
+      .map(x => ({ ...x, player: players.find(p => p.id === x.giocatoreId) }))
+      .filter(x => x.player)
+  );
 
   const mostraCreaGiocatore = radunoNomeDaCreare && radunoNomeDaCreare.reparto === rep.id;
 
