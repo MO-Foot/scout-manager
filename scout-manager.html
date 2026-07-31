@@ -2363,6 +2363,25 @@ function migraTuttiSquadraCategorie(playersArr) {
 }
 let currentTab = "elenco";
 
+// Ricorda da quale schermata è stata aperta la scheda di un giocatore per la
+// MODIFICA (bottone "Modifica scheda" dentro il dettaglio), così che al
+// salvataggio (o all'Annulla) si torni lì invece di finire sempre su Elenco
+// Giocatori. Es.: se apro un giocatore da un Raduno, dopo aver salvato
+// voglio ritrovarmi su quello stesso Raduno, non sull'Elenco.
+let schedaProvenienza = null;
+function tornaAllaSchedaProvenienza() {
+  if (schedaProvenienza) {
+    const p = schedaProvenienza;
+    schedaProvenienza = null;
+    if (p.tab === "raduni") { raduniSezione = p.raduniSezione; radunoCorrenteId = p.radunoCorrenteId; }
+    else if (p.tab === "allenatori") { allenatoriSezione = p.allenatoriSezione; allenatoreCorrenteId = p.allenatoreCorrenteId; }
+    else if (p.tab === "esercizi") { eserciziSezione = p.eserciziSezione; esercizioCorrenteId = p.esercizioCorrenteId; }
+    switchTab(p.tab);
+  } else {
+    switchTab("elenco");
+  }
+}
+
 let filtroTesto = "";
 let filtroAnno = "tutti";
 let filtroSquadra = "tutte";
@@ -5017,7 +5036,16 @@ function apriDettaglio(id) {
 
   document.getElementById("modal-close").onclick = chiudiModal;
   document.getElementById("modal-overlay").onclick = e => { if (e.target.id === "modal-overlay") chiudiModal(); };
-  document.getElementById("btn-modifica").onclick = () => { chiudiModal(); switchTab("nuova", p); };
+  document.getElementById("btn-modifica").onclick = () => {
+    schedaProvenienza = {
+      tab: currentTab,
+      raduniSezione, radunoCorrenteId,
+      allenatoriSezione, allenatoreCorrenteId,
+      eserciziSezione, esercizioCorrenteId,
+    };
+    chiudiModal();
+    switchTab("nuova", p);
+  };
   document.getElementById("btn-stampa").onclick = () => window.print();
   document.getElementById("btn-riassunto-ai").onclick = async () => {
     const btn = document.getElementById("btn-riassunto-ai");
@@ -5052,7 +5080,7 @@ function apriDettaglio(id) {
       players = players.filter(pl => pl.id !== id);
       savePlayers();
       chiudiModal();
-      renderElenco(document.getElementById("content"));
+      render(); // resta sulla schermata da cui era stata aperta la scheda (es. il Raduno), non forza su Elenco
     }
   };
 }
@@ -5503,7 +5531,7 @@ function renderForm(content, p) {
   document.getElementById("btn-add-trasferimento").onclick = () => trasfContainer.appendChild(creaRigaTrasferimento());
   document.getElementById("btn-add-misurazione").onclick = () => misContainer.appendChild(creaRigaMisurazione());
   document.getElementById("btn-add-partita").onclick = () => partiteContainer.appendChild(creaRigaPartita());
-  document.getElementById("btn-annulla").onclick = () => switchTab("elenco");
+  document.getElementById("btn-annulla").onclick = () => tornaAllaSchedaProvenienza();
 
   let fotoCorrente = p && p.foto ? p.foto : "";
   document.getElementById("fp-foto-input").onchange = async e => {
@@ -5752,7 +5780,7 @@ function salvaForm(existingId, foto) {
   }
 
   savePlayers();
-  switchTab("elenco");
+  tornaAllaSchedaProvenienza();
 }
 
 /* ===================== IMPORT PDF ===================== */
