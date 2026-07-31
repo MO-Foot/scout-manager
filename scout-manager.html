@@ -1412,7 +1412,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 30/07/2026 · 13:05</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 31/07/2026 · 23:58</div>
         </div>
       </div>
     </header>
@@ -8709,7 +8709,7 @@ function statoLegenda(chiave) {
 // dello swatch, vedi prossimoStatoLegenda): Kaderspieler in cima, poi Pikett,
 // Nachnominiert, Verletzt, Kader A. Tutto il resto (Abgesagt, Sichtung Klub,
 // Sonstiges, nessuno stato) va in coda senza un ordine preciso tra loro.
-const RADUNO_PRIORITA_ORDINE_STATO = ["kaderspieler", "pikett", "nachnominiert", "verletzt", "kadera"];
+const RADUNO_PRIORITA_ORDINE_STATO = ["kadera", "kaderspieler", "pikett", "nachnominiert", "verletzt"];
 function prioritaOrdineStato(chiave) {
   const i = RADUNO_PRIORITA_ORDINE_STATO.indexOf(chiave);
   return i === -1 ? RADUNO_PRIORITA_ORDINE_STATO.length : i;
