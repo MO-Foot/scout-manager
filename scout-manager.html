@@ -405,9 +405,10 @@ body{
   color: var(--chalk);
   border-bottom: 3px solid var(--gold);
 }
-.navtab-blue{ background: rgba(58,166,224,0.22); border-radius: 6px 6px 0 0; }
-.navtab-red{ background: rgba(193,85,74,0.14); border-radius: 6px 6px 0 0; }
+.navtab-blue{ background: rgba(58,166,224,0.32); border-radius: 6px 6px 0 0; }
+.navtab-red{ background: rgba(193,85,74,0.14); border: 1.5px solid rgba(242,239,230,0.7); border-radius: 6px 6px 0 0; }
 .navtab-grey{ background: rgba(143,163,150,0.14); border-radius: 6px 6px 0 0; }
+.navtab-green{ background: rgba(78,167,46,0.20); border-radius: 6px 6px 0 0; }
 /* Bianco e nero: sfondo E contorno (a differenza degli altri navtab, che hanno solo sfondo) */
 .navtab-bn{ background: rgba(242,239,230,0.12); border: 1.5px solid rgba(242,239,230,0.7); border-radius: 6px 6px 0 0; }
 
@@ -1414,19 +1415,19 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 00:45</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 01:05</div>
         </div>
       </div>
     </header>
 
     <nav class="nav-tabs">
-      <button class="navtab active navtab-blue" id="nav-elenco" type="button">Elenco Giocatori</button>
-      <button class="navtab navtab-blue" id="nav-calendario" type="button">Calendario</button>
+      <button class="navtab active navtab-blue" id="nav-elenco" type="button">Giocatori</button>
       <button class="navtab navtab-blue" id="nav-presenze" type="button">Presenze</button>
+      <button class="navtab navtab-blue" id="nav-calendario" type="button">Calendario</button>
+      <button class="navtab navtab-blue" id="nav-allenatori" type="button">Allenatori</button>
       <button class="navtab navtab-red" id="nav-raduni" type="button">Raduni U16</button>
       <button class="navtab navtab-bn" id="nav-raduniFcl" type="button">Raduni FCL</button>
-      <button class="navtab navtab-red" id="nav-esercizi" type="button">Eserciziario</button>
-      <button class="navtab navtab-grey" id="nav-allenatori" type="button">Allenatori</button>
+      <button class="navtab navtab-green" id="nav-esercizi" type="button">Eserciziario</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
     </nav>
 
