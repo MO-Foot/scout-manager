@@ -1412,7 +1412,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 31/07/2026 · 23:58</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 00:12</div>
         </div>
       </div>
     </header>
@@ -3880,7 +3880,32 @@ function renderLogo() {
   if (rimuoviBtn) rimuoviBtn.style.display = logoPersonalizzato ? "inline" : "none";
 }
 
+// Per TUTTI i campi con suggerimenti (<input list="...">, es. Scout, Ruolo,
+// Squadra, Etichette...): il browser, se il campo è già compilato, mostra
+// spesso solo l'opzione già scritta invece dell'elenco completo — bisognava
+// prima cancellare il testo per vedere le altre possibilità. Qui, appena il
+// campo riceve il focus, lo svuotiamo temporaneamente (così il menu a tendina
+// mostra TUTTE le opzioni, come se il campo fosse vuoto); se l'utente esce dal
+// campo senza aver scelto/scritto nulla, rimettiamo il valore originale.
+function abilitaSuggerimentiCompletiSuFocus() {
+  document.addEventListener("focusin", e => {
+    const el = e.target;
+    if (el.tagName === "INPUT" && el.hasAttribute("list") && el.value) {
+      el.dataset.valorePreFocus = el.value;
+      el.value = "";
+    }
+  });
+  document.addEventListener("focusout", e => {
+    const el = e.target;
+    if (el.tagName === "INPUT" && el.hasAttribute("list") && el.dataset.valorePreFocus !== undefined) {
+      if (el.value === "") el.value = el.dataset.valorePreFocus;
+      delete el.dataset.valorePreFocus;
+    }
+  });
+}
+
 async function boot() {
+  abilitaSuggerimentiCompletiSuFocus();
   document.getElementById("nav-elenco").onclick = () => switchTab("elenco");
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
