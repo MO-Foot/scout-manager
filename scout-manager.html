@@ -408,6 +408,8 @@ body{
 .navtab-blue{ background: rgba(58,166,224,0.22); border-radius: 6px 6px 0 0; }
 .navtab-red{ background: rgba(193,85,74,0.14); border-radius: 6px 6px 0 0; }
 .navtab-grey{ background: rgba(143,163,150,0.14); border-radius: 6px 6px 0 0; }
+/* Bianco e nero: sfondo E contorno (a differenza degli altri navtab, che hanno solo sfondo) */
+.navtab-bn{ background: rgba(242,239,230,0.12); border: 1.5px solid rgba(242,239,230,0.7); border-radius: 6px 6px 0 0; }
 
 /* ---------- Buttons ---------- */
 .btn{
@@ -1412,7 +1414,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 00:12</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 00:45</div>
         </div>
       </div>
     </header>
@@ -1422,6 +1424,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
       <button class="navtab navtab-blue" id="nav-calendario" type="button">Calendario</button>
       <button class="navtab navtab-blue" id="nav-presenze" type="button">Presenze</button>
       <button class="navtab navtab-red" id="nav-raduni" type="button">Raduni U16</button>
+      <button class="navtab navtab-bn" id="nav-raduniFcl" type="button">Raduni FCL</button>
       <button class="navtab navtab-red" id="nav-esercizi" type="button">Eserciziario</button>
       <button class="navtab navtab-grey" id="nav-allenatori" type="button">Allenatori</button>
       <button class="navtab" id="nav-strumenti" type="button">Strumenti</button>
@@ -3909,6 +3912,7 @@ async function boot() {
   document.getElementById("nav-elenco").onclick = () => switchTab("elenco");
   document.getElementById("nav-calendario").onclick = () => switchTab("calendario");
   document.getElementById("nav-raduni").onclick = () => switchTab("raduni");
+  document.getElementById("nav-raduniFcl").onclick = () => switchTab("raduniFcl");
   document.getElementById("nav-allenatori").onclick = () => switchTab("allenatori");
   document.getElementById("nav-esercizi").onclick = () => switchTab("esercizi");
   document.getElementById("nav-presenze").onclick = () => switchTab("presenze");
@@ -4040,7 +4044,7 @@ function switchTab(tab, editPlayer) {
 // attaccanti in un raduno). Nel secondo caso è giusto ripartire dall'alto.
 let ultimaChiaveVistaRender = null;
 function render(editPlayer) {
-  const chiaveVista = currentTab === "raduni" ? `raduni|${raduniSezione}|${radunoCorrenteId || ""}|${raduniSezione === "allenamenti" ? allenamentiVista + "|" + (allenamentoCorrenteId || "") : ""}`
+  const chiaveVista = (currentTab === "raduni" || currentTab === "raduniFcl") ? `${currentTab}|${raduniSezione}|${radunoCorrenteId || ""}|${raduniSezione === "allenamenti" ? allenamentiVista + "|" + (allenamentoCorrenteId || "") : ""}`
     : currentTab === "allenatori" ? `allenatori|${allenatoriSezione}|${allenatoreCorrenteId || ""}`
     : currentTab === "esercizi" ? `esercizi|${eserciziSezione}|${esercizioCorrenteId || ""}`
     : currentTab;
@@ -4053,7 +4057,7 @@ function render(editPlayer) {
   if (currentTab === "elenco") renderElenco(content);
   else if (currentTab === "nuova") renderForm(content, editPlayer || null);
   else if (currentTab === "calendario") renderCalendario(content);
-  else if (currentTab === "raduni") renderRaduni(content);
+  else if (currentTab === "raduni" || currentTab === "raduniFcl") renderRaduni(content);
   else if (currentTab === "allenatori") renderAllenatori(content);
   else if (currentTab === "esercizi") renderEserciziario(content);
   else if (currentTab === "presenze") renderPresenze(content);
@@ -8810,6 +8814,18 @@ let radunoCorrenteId = null;
 let radunoNomeDaCreare = null;
 let radunoImportBozza = null;
 
+// I raduni U16 (Nazionale) e i raduni FCL (Partenariato U15 Ticino, FC Lugano
+// U15 + FC Giubiasco U15) condividono TUTTO il codice sottostante (stessa
+// gestione rosa, reparti, stati Kaderliste, allenamenti, export...): l'unica
+// differenza è il campo "gruppo" salvato su ciascun raduno, che determina in
+// quale delle due schede (tab) compare. currentTab resta "raduni" o
+// "raduniFcl" per l'intera durata della lavorazione su un raduno (lista →
+// form/dettaglio/allenamenti), quindi possiamo dedurre il gruppo da lì in
+// ogni punto in cui serve, senza bisogno di un'altra variabile globale.
+function radunoGruppoAttivo() {
+  return currentTab === "raduniFcl" ? "fcl" : "u16";
+}
+
 // Zoom del campo tattico nella vista dettaglio raduno (pulsanti, pinch a due
 // dita, Ctrl/Cmd+rotellina): livello 1 = 100%, min 0.5 (50%), max 2.5 (250%).
 let radunoZoomLivello = 1;
@@ -8875,11 +8891,18 @@ function renderRaduni(content) {
 }
 
 function renderRaduniLista(content) {
-  const raduniOrdinati = raduni.slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
+  const gruppo = radunoGruppoAttivo();
+  const raduniOrdinati = raduni
+    .filter(r => (r.gruppo || "u16") === gruppo)
+    .slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
+  const titolo = gruppo === "fcl" ? "Raduni FCL" : "Raduni U16";
+  const descrizione = gruppo === "fcl"
+    ? "Gestisci i raduni del Partenariato U15 Ticino (FC Lugano U15 e FC Giubiasco U15): crea la rosa a mano scegliendo giocatori dall'Elenco, oppure importa la rosa direttamente da un file Excel Kaderliste."
+    : "Gestisci i raduni U16 (Kader A o TYT): crea la rosa a mano scegliendo giocatori dall'Elenco, oppure importa la rosa direttamente da un file Excel Kaderliste.";
   content.innerHTML = `
     <div class="import-box">
-      <h2>Raduni U16</h2>
-      <p class="muted">Gestisci i raduni U16 (Kader A o TYT): crea la rosa a mano scegliendo giocatori dall'Elenco, oppure importa la rosa direttamente da un file Excel Kaderliste.</p>
+      <h2>${esc(titolo)}</h2>
+      <p class="muted">${esc(descrizione)}</p>
       <div class="import-actions">
         <button class="btn btn-primary" id="btn-nuovo-raduno">+ Nuovo raduno</button>
         <label class="btn btn-ghost" style="cursor:pointer;">
@@ -9047,7 +9070,7 @@ function renderRadunoForm(content) {
       Object.assign(r, dati);
       radunoCorrenteId = r.id;
     } else {
-      const nuovo = { id: uid(), rosa: [], repartiPersonalizzati: [], ...dati };
+      const nuovo = { id: uid(), rosa: [], repartiPersonalizzati: [], gruppo: radunoGruppoAttivo(), ...dati };
       raduni.push(nuovo);
       radunoCorrenteId = nuovo.id;
     }
@@ -10048,7 +10071,7 @@ function confermaImportScheda(si, sostituisciRosa) {
       stagione: s.stagione || "", annata: s.annata || "", modulo: s.modulo || MODULI_RADUNO[0],
       trainer: s.trainer || "", assistente1: s.assistente1 || "", assistente2: s.assistente2 || "",
       thTrainer: s.thTrainer || "", athletik: s.athletik || "", analyst: s.analyst || "", tom: s.tom || "",
-      eventoCalendarioId: null, rosa: [], repartiPersonalizzati: []
+      eventoCalendarioId: null, rosa: [], repartiPersonalizzati: [], gruppo: radunoGruppoAttivo()
     };
     raduni.push(raduno);
   }
