@@ -860,6 +860,8 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
 .mirwald-body{ margin-top: 12px; }
 .modal-list{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .modal-list li{ font-size: 13.5px; }
+.partita-link{ display: inline-block; margin-top: 4px; font-size: 12.5px; color: var(--gold); text-decoration: none; }
+.partita-link:hover{ text-decoration: underline; }
 .modal-actions{ margin-top: 22px; display: flex; gap: 10px; }
 .modal-actions-top{ margin: 4px 0 18px; display: flex; gap: 10px; justify-content: flex-end; }
 .mono{ font-family: var(--font-mono); color: var(--chalk); }
@@ -1419,7 +1421,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 01/08/2026 · 01:05</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 03/08/2026 · 11:08</div>
         </div>
       </div>
     </header>
@@ -4913,6 +4915,7 @@ function apriDettaglio(id) {
         ${m.competizione ? `<br><span class="muted">${esc(m.competizione)}</span>` : ""}
         ${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) || m.gol ? `<br><span class="muted">${m.minutiGiocati !== null && m.minutiGiocati !== undefined ? esc(m.minutiGiocati) + "' giocati" : ""}${m.gol ? (m.minutiGiocati !== null && m.minutiGiocati !== undefined ? ", " : "") + esc(m.gol) + " gol" : ""}</span>` : ""}
         ${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ""}
+        ${m.link ? `<br><a href="${esc(m.link)}" target="_blank" rel="noopener" class="partita-link no-print" onclick="event.stopPropagation()">🔗 Apri tabellino</a>` : ""}
       </li>`)
     .join("") || "<li class='muted'>Nessuna partita registrata.</li>";
 
@@ -7004,7 +7007,7 @@ async function elaboraFilePresenzePartite(file) {
   const iCognome = idx("cognome"), iNome = idx("nome"), iData = idx("data"),
     iCompetizione = idx("competizione"), iSquadra = idx("squadra"), iAvversario = idx("avversario"),
     iRisultato = idx("risultato"), iPresenza = idx("presenza"), iMinuti = idx("minuti"),
-    iGol = idx("gol"), iNote = idx("note");
+    iGol = idx("gol"), iNote = idx("note"), iLink = idx("link");
 
   const testo = v => (v === undefined || v === null) ? "" : v.toString().trim();
   const toISO = d => {
@@ -7049,6 +7052,10 @@ async function elaboraFilePresenzePartite(file) {
       minutiGiocati: iMinuti >= 0 ? numOrNull(r[iMinuti]) : null,
       gol: iGol >= 0 ? numOrNull(r[iGol]) : null,
       note: iNote >= 0 && testo(r[iNote]) ? testo(r[iNote]) : "Fonte: MatchCenter SFL",
+      // Colonna "Link" opzionale: URL del tabellino su MatchCenter, mostrato
+      // come link cliccabile nella scheda giocatore. Se il file non ha
+      // questa colonna (import più vecchi) semplicemente non c'è alcun link.
+      ...(iLink >= 0 && testo(r[iLink]) ? { link: testo(r[iLink]) } : {}),
     });
     aggiornati++;
   }
@@ -7647,7 +7654,21 @@ function renderPresenze(content) {
     <div class="presenze-lista">${settimaneHTML}</div>
   `;
 
-  document.getElementById("fp-testo").oninput = e => { filtroPresenzeTesto = e.target.value; renderPresenze(content); };
+  document.getElementById("fp-testo").oninput = e => {
+    filtroPresenzeTesto = e.target.value;
+    // renderPresenze ricostruisce tutto il contenuto (content.innerHTML = ...),
+    // quindi il campo di ricerca viene distrutto e ricreato ad ogni lettera
+    // digitata: senza ridare il focus manualmente al nuovo campo, il cursore
+    // "esce" dalla ricerca dopo ogni carattere. Salviamo la posizione del
+    // cursore prima del re-render e la ripristiniamo sul nuovo elemento.
+    const posizioneCursore = e.target.selectionStart;
+    renderPresenze(content);
+    const nuovoCampo = document.getElementById("fp-testo");
+    if (nuovoCampo) {
+      nuovoCampo.focus();
+      nuovoCampo.setSelectionRange(posizioneCursore, posizioneCursore);
+    }
+  };
   document.getElementById("fp-competizione").onchange = e => { filtroPresenzeCompetizione = e.target.value; renderPresenze(content); };
 
   content.querySelectorAll(".presenze-settimana").forEach(det => {
@@ -10358,6 +10379,7 @@ function esportaRadunoExcel(r) {
 let allenatoriSezione = "lista";
 let allenatoreCorrenteId = null;
 let filtroTestoAllenatori = "";
+let filtroCategoriaAllenatori = "tutte";
 
 function trovaAllenatoriPerSquadra(nomeSquadra) {
   const ric = analizzaNomeSquadra(nomeSquadra);
@@ -10435,37 +10457,65 @@ function renderAllenatoriLista(content) {
         <button class="btn btn-primary" id="btn-nuovo-allenatore">+ Nuovo allenatore</button>
       </div>
       <div class="filtri-bar" style="margin-top:14px;">
-        <input type="text" id="f-allenatori-testo" class="f-input f-testo" placeholder="Cerca nome o squadra..." value="${esc(filtroTestoAllenatori)}">
+        <input type="text" id="f-allenatori-testo" class="f-input f-testo" placeholder="Cerca allenatore, squadra, categoria o giocatore..." value="${esc(filtroTestoAllenatori)}">
+        <select id="f-allenatori-categoria" class="f-input">
+          <option value="tutte" ${filtroCategoriaAllenatori === "tutte" ? "selected" : ""}>Tutte le categorie</option>
+          ${CATEGORIE_FISSE.map(c => `<option value="${esc(c)}" ${filtroCategoriaAllenatori === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          <option value="nessuna" ${filtroCategoriaAllenatori === "nessuna" ? "selected" : ""}>Senza categoria</option>
+        </select>
       </div>
       <div class="import-subsection" id="allenatori-container"></div>
     </div>
   `;
   document.getElementById("btn-nuovo-allenatore").onclick = () => { allenatoreCorrenteId = null; allenatoriSezione = "form"; render(); };
   document.getElementById("f-allenatori-testo").oninput = (e) => { filtroTestoAllenatori = e.target.value; renderAllenatoriRisultati(); };
+  document.getElementById("f-allenatori-categoria").onchange = (e) => { filtroCategoriaAllenatori = e.target.value; renderAllenatoriRisultati(); };
   renderAllenatoriRisultati();
+}
+
+// Ordine di visualizzazione delle categorie: dalla più giovane alla Prima
+// Squadra, seguendo lo stesso ordine di CATEGORIE_FISSE usato ovunque nel
+// resto dell'app. Chi non ha nessuna categoria assegnata (unico allenatore
+// del club) va in fondo, dopo la Prima Squadra.
+function ordinaleCategoriaAllenatore(categoria) {
+  if (!categoria) return CATEGORIE_FISSE.length;
+  const i = CATEGORIE_FISSE.indexOf(categoria);
+  return i === -1 ? CATEGORIE_FISSE.length : i;
 }
 
 function renderAllenatoriRisultati() {
   const container = document.getElementById("allenatori-container");
   if (!container) return;
   const q = filtroTestoAllenatori.trim().toLowerCase();
-  const elenco = allenatori
-    .filter(a => !q || `${a.nome || ""} ${a.squadra || ""}`.toLowerCase().includes(q))
-    .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
 
-  // Conta i giocatori collegati a ciascun allenatore in UN solo giro su
-  // tutti i giocatori (invece di richiamare giocatoriDiAllenatore — che
-  // scorre l'intera rubrica allenatori per OGNI giocatore — una volta per
-  // ciascuna scheda allenatore mostrata: con molte voci in rubrica quel
-  // conteggio ripetuto era diventato il vero collo di bottiglia della
-  // pagina, vedi commento su analizzaNomeSquadra).
+  // Nomi dei giocatori collegati a ciascun allenatore: servono sia per il
+  // conteggio mostrato in ogni scheda, sia per poter cercare "Puddu" nella
+  // barra di ricerca e trovare l'allenatore del suo giocatore.
   const conteggioGiocatoriPerAllenatore = new Map();
+  const giocatoriPerAllenatore = new Map();
   players.forEach(p => {
     const r = allenatoreDelGiocatore(p);
     if (r.allenatore) {
       conteggioGiocatoriPerAllenatore.set(r.allenatore.id, (conteggioGiocatoriPerAllenatore.get(r.allenatore.id) || 0) + 1);
+      if (!giocatoriPerAllenatore.has(r.allenatore.id)) giocatoriPerAllenatore.set(r.allenatore.id, []);
+      giocatoriPerAllenatore.get(r.allenatore.id).push(`${p.cognome || ""} ${p.nome || ""}`.trim());
     }
   });
+
+  const elenco = allenatori
+    .filter(a => filtroCategoriaAllenatori === "tutte"
+      || (filtroCategoriaAllenatori === "nessuna" ? !a.categoria : a.categoria === filtroCategoriaAllenatori))
+    .filter(a => {
+      if (!q) return true;
+      const nomiGiocatori = (giocatoriPerAllenatore.get(a.id) || []).join(" ");
+      const haystack = `${a.nome || ""} ${a.squadra || ""} ${a.categoria || ""} ${nomiGiocatori}`.toLowerCase();
+      return haystack.includes(q);
+    })
+    .sort((a, b) => {
+      const oa = ordinaleCategoriaAllenatore(a.categoria), ob = ordinaleCategoriaAllenatore(b.categoria);
+      if (oa !== ob) return oa - ob;
+      return (a.nome || "").localeCompare(b.nome || "", "it");
+    });
 
   container.innerHTML = elenco.length
     ? elenco.map(a => allenatoreCardHTML(a, conteggioGiocatoriPerAllenatore.get(a.id) || 0)).join("")
