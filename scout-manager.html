@@ -861,6 +861,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
 .modal-list{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .modal-list li{ font-size: 13.5px; }
 .modal-actions{ margin-top: 22px; display: flex; gap: 10px; }
+.modal-actions-top{ margin: 4px 0 18px; display: flex; gap: 10px; justify-content: flex-end; }
 .mono{ font-family: var(--font-mono); color: var(--chalk); }
 .muted{ color: var(--muted); }
 .rating-inline{ font-family: var(--font-mono); padding: 1px 7px; border: 1px dashed var(--line); border-radius: 20px; font-size: 12px; }
@@ -897,6 +898,9 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   max-width: 760px;
 }
 .player-form h2{ font-family: var(--font-display); font-size: 26px; margin: 0 0 16px; letter-spacing: 0.02em; }
+.form-actions-top{ display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.form-actions-top h2{ margin: 0 0 16px; }
+.form-actions-top-buttons{ display: flex; gap: 8px; margin-bottom: 16px; }
 .form-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -4943,6 +4947,9 @@ function apriDettaglio(id) {
           <div class="card-badge large ${ratingClass(media)}">${media !== null ? media.toFixed(1) : "-"}</div>
           <div class="modal-radar">${radarChartSVG(medieTips(p, filtroScouts), { size: 108, showLabels: true })}</div>
         </div>
+        <div class="modal-actions-top no-print">
+          <button class="btn btn-primary btn-sm" id="btn-modifica-top">Modifica scheda</button>
+        </div>
         ${p.note ? `<div class="modal-section"><h3>Note generali</h3><p class="muted">${esc(p.note)}</p>${p.noteModificateIl ? `<p class="muted" style="font-size:11px; margin-top:4px;">Nota aggiornata il ${formatDataIt(p.noteModificateIl)}</p>` : ""}</div>` : ""}
         ${(() => {
           const info = allenatoreDelGiocatore(p);
@@ -5066,7 +5073,7 @@ function apriDettaglio(id) {
 
   document.getElementById("modal-close").onclick = chiudiModal;
   document.getElementById("modal-overlay").onclick = e => { if (e.target.id === "modal-overlay") chiudiModal(); };
-  document.getElementById("btn-modifica").onclick = () => {
+  const apriModificaScheda = () => {
     schedaProvenienza = {
       tab: currentTab,
       raduniSezione, radunoCorrenteId,
@@ -5076,6 +5083,8 @@ function apriDettaglio(id) {
     chiudiModal();
     switchTab("nuova", p);
   };
+  document.getElementById("btn-modifica").onclick = apriModificaScheda;
+  document.getElementById("btn-modifica-top").onclick = apriModificaScheda;
   document.getElementById("btn-stampa").onclick = () => window.print();
   document.getElementById("btn-riassunto-ai").onclick = async () => {
     const btn = document.getElementById("btn-riassunto-ai");
@@ -5380,7 +5389,13 @@ function renderForm(content, p) {
 
   content.innerHTML = `
     <form id="player-form" class="player-form">
-      <h2>${p ? "Modifica scheda giocatore" : "Nuova scheda giocatore"}</h2>
+      <div class="form-actions-top">
+        <h2>${p ? "Modifica scheda giocatore" : "Nuova scheda giocatore"}</h2>
+        <div class="form-actions-top-buttons">
+          <button type="submit" class="btn btn-primary btn-sm">Salva scheda</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-annulla-top">Annulla</button>
+        </div>
+      </div>
 
       <div class="foto-upload">
         <div class="foto-preview-wrap">
@@ -5562,6 +5577,7 @@ function renderForm(content, p) {
   document.getElementById("btn-add-misurazione").onclick = () => misContainer.appendChild(creaRigaMisurazione());
   document.getElementById("btn-add-partita").onclick = () => partiteContainer.appendChild(creaRigaPartita());
   document.getElementById("btn-annulla").onclick = () => tornaAllaSchedaProvenienza();
+  document.getElementById("btn-annulla-top").onclick = () => tornaAllaSchedaProvenienza();
 
   let fotoCorrente = p && p.foto ? p.foto : "";
   document.getElementById("fp-foto-input").onchange = async e => {
@@ -8895,7 +8911,15 @@ function renderRaduniLista(content) {
   const gruppo = radunoGruppoAttivo();
   const raduniOrdinati = raduni
     .filter(r => (r.gruppo || "u16") === gruppo)
-    .slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
+    .slice().sort((a, b) => {
+      // Ordine cronologico: dal raduno più vecchio al più recente. Chi non
+      // ha ancora una data di inizio (raduno appena creato, non compilato)
+      // va in fondo, così non si mescola tra le date note.
+      if (!a.dataInizio && !b.dataInizio) return 0;
+      if (!a.dataInizio) return 1;
+      if (!b.dataInizio) return -1;
+      return a.dataInizio.localeCompare(b.dataInizio);
+    });
   const titolo = gruppo === "fcl" ? "Raduni FCL" : "Raduni U16";
   const descrizione = gruppo === "fcl"
     ? "Gestisci i raduni del Partenariato U15 Ticino (FC Lugano U15 e FC Giubiasco U15): crea la rosa a mano scegliendo giocatori dall'Elenco, oppure importa la rosa direttamente da un file Excel Kaderliste."
