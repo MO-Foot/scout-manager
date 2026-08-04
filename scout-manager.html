@@ -9741,7 +9741,7 @@ function estraiMetaGiocatore(row, colonnaNome) {
 function parseFoglioKaderliste(aoa, ws) {
   const scheda = {
     nome: "", luogo: "", stagione: "", trainer: "", assistente1: "", assistente2: "",
-    thTrainer: "", athletik: "", analyst: "", tom: "", modulo: null, annata: null,
+    thTrainer: "", athletik: "", analyst: "", tom: "", modulo: null, moduloCandidati: [], annata: null,
     reparti: []
   };
   // Nel file reale ci sono più reparti affiancati sulla stessa riga di
@@ -9793,10 +9793,42 @@ function parseFoglioKaderliste(aoa, ws) {
       if (RADUNO_LABEL_REGEX.spielsysteme.test(testo)) {
         // Nel file reale il valore di "Spielsysteme:" a volte non è sulla
         // stessa riga dell'etichetta ma nella riga subito sotto, stessa
-        // colonna — proviamo entrambe le posizioni.
-        let val = primoValoreNonVuoto(row, ci + 1, 6);
-        if (!val && aoa[ri + 1]) val = primoValoreNonVuoto(aoa[ri + 1], ci, 3);
-        scheda.modulo = rilevaModuloDaTesto(val) || rilevaModuloDaTesto(testo);
+        // colonna. Alcuni file (es. quelli della Nazionale) elencano invece
+        // più sistemi possibili, uno per riga ("1) 1-4-3-1-2", "2) ...",
+        // "3) ..."), senza indicare quale sia quello davvero in uso: in quel
+        // caso raccogliamo TUTTI i moduli riconosciuti nelle righe sotto
+        // l'etichetta (candidati) invece di prendere per buono solo il primo
+        // valore trovato, che altrimenti sarebbe la sola scritta "1)" e
+        // farebbe fallire silenziosamente il riconoscimento. La scelta tra i
+        // candidati viene poi lasciata all'utente nella schermata di verifica
+        // (vedi radunoSchedaImportHTML).
+        const candidati = [];
+        const valStessaRiga = primoValoreNonVuoto(row, ci + 1, 6);
+        const mStessaRiga = rilevaModuloDaTesto(valStessaRiga);
+        if (mStessaRiga) candidati.push(mStessaRiga);
+        for (let rr = ri + 1; rr <= ri + 4 && rr < aoa.length; rr++) {
+          const rowSotto = aoa[rr] || [];
+          // Proviamo sia "stessa colonna dell'etichetta" (caso di un solo
+          // valore sotto, senza numerazione) sia "una colonna a destra"
+          // (caso "1) 1-4-3-1-2" con l'etichetta numerata nella colonna
+          // dell'etichetta e il modulo in quella accanto).
+          [primoValoreNonVuoto(rowSotto, ci, 3), primoValoreNonVuoto(rowSotto, ci + 1, 5)].forEach(v => {
+            const m = rilevaModuloDaTesto(v);
+            if (m && !candidati.includes(m)) candidati.push(m);
+          });
+        }
+        if (!candidati.length) {
+          const mTesto = rilevaModuloDaTesto(testo);
+          if (mTesto) candidati.push(mTesto);
+        }
+        scheda.moduloCandidati = candidati;
+        // Con un solo candidato riconosciuto lo usiamo direttamente come
+        // prima; con più candidati ne pre-selezioniamo il primo solo come
+        // punto di partenza comodo in revisione, ma scheda.moduloCandidati
+        // resta popolato per mostrare l'avviso "verifica" all'utente, perché
+        // qui non possiamo sapere con certezza quale dei sistemi elencati sia
+        // quello realmente usato per questa rosa.
+        scheda.modulo = candidati.length ? candidati[0] : null;
         continue;
       }
       if (/^torh[üu]ter/i.test(testo)) {
@@ -10100,6 +10132,24 @@ function renderRadunoImporta(content) {
       bozza.schede[si].reparti[repI].candidati[cIdx].stato = sel.value || null;
     });
   });
+  content.querySelectorAll("[data-cambia-modulo-scheda]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const si = Number(sel.dataset.cambiaModuloScheda);
+      const s = bozza.schede[si];
+      s.modulo = sel.value;
+      // Ricalcoliamo lo slot di destinazione di default per ogni reparto sul
+      // nuovo modulo scelto, e riportiamo anche i candidati già mostrati sul
+      // nuovo default: cambiare modulo qui avviene tipicamente come primo
+      // passo in revisione, prima di correggere manualmente i singoli
+      // giocatori, quindi ha senso far ripartire l'assegnazione automatica
+      // invece di lasciare gli slot calcolati sul modulo sbagliato.
+      assegnaSlotDefaultImport(s);
+      s.reparti.forEach(rep => {
+        rep.candidati.forEach(c => { c.slotId = rep.slotIdDefault; });
+      });
+      render();
+    });
+  });
 }
 
 function radunoSchedaImportHTML(s, si, targetRaduno) {
@@ -10115,7 +10165,16 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
   const totMatch = s.reparti.reduce((n, rep) => n + rep.candidati.filter(c => c.match).length, 0);
   return `
     <div class="import-subsection">
-      <h3>${esc(s.nome)} ${s.modulo ? `<span class="chip" style="margin-left:8px;">${esc(s.modulo)}</span>` : ""}</h3>
+      <h3>${esc(s.nome)}</h3>
+      <div style="display:flex; align-items:center; gap:8px; margin:2px 0 8px; flex-wrap:wrap;">
+        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px;">
+          Modulo:
+          <select data-cambia-modulo-scheda="${si}">
+            ${MODULI_RADUNO.map(m => `<option value="${esc(m)}" ${s.modulo === m ? "selected" : ""}>${esc(m)}</option>`).join("")}
+          </select>
+        </label>
+        ${s.moduloCandidati && s.moduloCandidati.length > 1 ? `<span class="chip" style="font-size:11.5px; background:#ffedd5; color:#9a3412;" title="Il file elenca più sistemi di gioco possibili (${esc(s.moduloCandidati.join(", "))}) senza indicare quale sia quello in uso per questa rosa: ho preselezionato il primo, ma controlla e correggi se serve.">⚠️ Modulo non certo — verifica</span>` : ""}
+      </div>
       <p class="muted" style="font-size:12.5px;">
         ${s.luogo ? esc(s.luogo) + " · " : ""}${s.stagione ? "Stagione " + esc(s.stagione) + " · " : ""}
         ${s.trainer ? "Trainer: " + esc(s.trainer) + " · " : ""}
