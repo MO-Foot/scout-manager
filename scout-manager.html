@@ -1632,7 +1632,11 @@ function coloreePiazzamento(chiave) {
 
 function renderRadunoAllenamenti(content) {
   const r = raduni.find(x => x.id === radunoCorrenteId);
-  if (!r) { raduniSezione = "lista"; render(); return; }
+  // Il raduno aperto deve appartenere al gruppo (U16/FCL) del tab attivo:
+  // altrimenti staremmo per mostrare/modificare gli allenamenti del raduno
+  // dell'ALTRO gruppo (vedi il reset in switchTab per il caso normale; questo
+  // controllo è una seconda rete di sicurezza).
+  if (!r || (r.gruppo || "u16") !== radunoGruppoAttivo()) { raduniSezione = "lista"; radunoCorrenteId = null; render(); return; }
   r.allenamenti = r.allenamenti || [];
   if (allenamentiVista === "form") { renderAllenamentoForm(content, r); return; }
   renderAllenamentiLista(content, r);
@@ -3081,7 +3085,31 @@ async function caricaSuDropbox() {
   } catch (e) { ultimoContentHashRemoto = null; }
 }
 
-async function savePlayers() {
+// savePlayers() viene chiamata a raffica (~40 punti diversi: ogni modifica,
+// ogni trascinamento, ogni import) senza mai essere "await-ata" da chi la
+// chiama, e la sincronizzazione automatica alla riconnessione
+// (sincronizzaSeInSospeso, sotto) può scattare in qualunque momento tramite
+// l'evento "online". Se lasciassimo partire più operazioni Dropbox in
+// parallelo, le richieste di rete potrebbero arrivare fuori ordine: quella
+// più lenta, basata su uno snapshot dei dati più vecchio, rischierebbe di
+// sovrascrivere silenziosamente su Dropbox un salvataggio più recente già
+// andato a buon fine. eseguiInCodaDropbox() mette in fila tutte le funzioni
+// che toccano Dropbox (usata sia da savePlayers che da
+// sincronizzaSeInSospeso più sotto): ognuna aspetta che la precedente sia
+// completamente finita prima di partire, così non ce n'è mai più di una
+// in corso alla volta.
+let codaDropboxInCorso = Promise.resolve();
+function eseguiInCodaDropbox(fn) {
+  const risultato = codaDropboxInCorso.then(fn, fn);
+  codaDropboxInCorso = risultato.catch(() => {}); // un fallimento non deve bloccare le richieste successive in coda
+  return risultato;
+}
+
+function savePlayers() {
+  return eseguiInCodaDropbox(eseguiSalvataggioPlayers);
+}
+
+async function eseguiSalvataggioPlayers() {
   // Prima di tutto: salva sempre una copia sul dispositivo, connessi o
   // no a Dropbox, online o offline — così nessuna modifica va mai persa
   // anche se manca la connessione o si chiude la pagina.
@@ -3121,21 +3149,26 @@ async function savePlayers() {
 // Prova a sincronizzare con Dropbox le modifiche fatte mentre eri
 // offline. Chiamata sia quando il browser segnala il ritorno della
 // connessione, sia manualmente (pulsante nella barra di stato).
-async function sincronizzaSeInSospeso() {
+function sincronizzaSeInSospeso() {
   if (!dropboxConnesso || !sincronizzazioneInSospeso) return;
-  try {
-    await assicuraTokenValido();
-    await caricaSuDropbox();
-    sincronizzazioneInSospeso = false;
-    await idbSet(CHIAVE_SYNC_IN_SOSPESO, false).catch(() => {});
-    renderDropboxStatusBar("connesso");
-    eseguiBackupAutomaticoSeNecessario();
-  } catch (e) {
-    console.error("Sincronizzazione automatica fallita", e);
-    if (!sembraOffline(e)) renderDropboxStatusBar("errore", e.message);
-    // se è ancora offline non facciamo nulla: si riproverà al prossimo
-    // evento "online" o salvataggio.
-  }
+  // In coda con savePlayers() (vedi eseguiInCodaDropbox sopra): l'evento
+  // "online" può scattare mentre un salvataggio manuale è già a metà, e le
+  // due chiamate a caricaSuDropbox() non devono mai sovrapporsi.
+  return eseguiInCodaDropbox(async () => {
+    try {
+      await assicuraTokenValido();
+      await caricaSuDropbox();
+      sincronizzazioneInSospeso = false;
+      await idbSet(CHIAVE_SYNC_IN_SOSPESO, false).catch(() => {});
+      renderDropboxStatusBar("connesso");
+      eseguiBackupAutomaticoSeNecessario();
+    } catch (e) {
+      console.error("Sincronizzazione automatica fallita", e);
+      if (!sembraOffline(e)) renderDropboxStatusBar("errore", e.message);
+      // se è ancora offline non facciamo nulla: si riproverà al prossimo
+      // evento "online" o salvataggio.
+    }
+  });
 }
 
 window.addEventListener("online", () => { sincronizzaSeInSospeso(); });
@@ -4031,6 +4064,21 @@ async function boot() {
 
 
 function switchTab(tab, editPlayer) {
+  // Se si passa da un gruppo di raduni all'altro (Raduni U16 <-> Raduni FCL),
+  // resettiamo la navigazione interna dei raduni: senza questo, radunoCorrenteId
+  // e raduniSezione restavano quelli del tab precedente, e la nuova scheda
+  // mostrava/lasciava modificare in silenzio il raduno DELL'ALTRO gruppo (bug
+  // che ha causato la cancellazione accidentale di giocatori Nazionale U16
+  // mentre si credeva di essere nella scheda Raduni FCL, o viceversa).
+  const eraRaduni = currentTab === "raduni" || currentTab === "raduniFcl";
+  const vaARaduni = tab === "raduni" || tab === "raduniFcl";
+  if (eraRaduni && vaARaduni && tab !== currentTab) {
+    raduniSezione = "lista";
+    radunoCorrenteId = null;
+    radunoImportBozza = null;
+    allenamentiVista = "lista";
+    allenamentoCorrenteId = null;
+  }
   currentTab = tab;
   document.querySelectorAll(".navtab").forEach(el => el.classList.remove("active"));
   const navAttivo = document.getElementById("nav-" + tab);
@@ -7126,12 +7174,19 @@ function trovaGiocatoreEsistente(cognome, nome, dataNascita) {
     const m = players.find(p => p.cognome.toLowerCase() === cognomeNorm && p.dataNascita === dataNascita);
     if (m) return m;
   }
-  // Priorità 2: cognome + nome esatti, utile quando la data manca
-  return players.find(p =>
+  // Priorità 2: cognome + nome esatti, utile quando la data manca. Se più di
+  // una scheda corrisponde (omonimi, nessuna con data di nascita registrata
+  // per distinguerli) NON possiamo scegliere con certezza: meglio non
+  // abbinare automaticamente — l'importazione tratterà il caso come "nuovo
+  // giocatore" (visibile e correggibile a mano, anche con lo strumento
+  // duplicati) piuttosto che agganciare in silenzio i dati alla scheda
+  // sbagliata tra due omonimi.
+  const candidati = players.filter(p =>
     p.cognome.toLowerCase() === cognomeNorm &&
     p.nome.toLowerCase() === nome.toLowerCase() &&
     (!dataNascita || !p.dataNascita || p.dataNascita === dataNascita)
   );
+  return candidati.length === 1 ? candidati[0] : null;
 }
 
 function valutazioneGiaPresente(lista, nuova) {
@@ -7479,16 +7534,6 @@ function trovaGruppiDuplicati() {
   return gruppi;
 }
 
-function dedupeArray(arr, chiaveFn) {
-  const viste = new Set();
-  return arr.filter(v => {
-    const k = chiaveFn(v);
-    if (viste.has(k)) return false;
-    viste.add(k);
-    return true;
-  });
-}
-
 function unisciGiocatori(idPrincipale, idsSecondari) {
   const principale = players.find(p => p.id === idPrincipale);
   if (!principale) return;
@@ -7496,6 +7541,8 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
   principale.valutazioni = principale.valutazioni || [];
   principale.etichette = principale.etichette || [];
   principale.trasferimenti = principale.trasferimenti || [];
+  principale.misurazioni = principale.misurazioni || [];
+  principale.partiteUfficiali = principale.partiteUfficiali || [];
 
   idsSecondari.forEach(id => {
     if (id === idPrincipale) return;
@@ -7505,6 +7552,11 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
     principale.valutazioni = principale.valutazioni.concat(secondario.valutazioni || []);
     (secondario.etichette || []).forEach(e => { if (!principale.etichette.includes(e)) principale.etichette.push(e); });
     principale.trasferimenti = principale.trasferimenti.concat(secondario.trasferimenti || []);
+    // Misurazioni fisiche (Mirwald) e partite ufficiali: mancavano dalla
+    // fusione, quindi se esistevano solo sulla scheda secondaria andavano
+    // perse silenziosamente quando la scheda veniva eliminata subito dopo.
+    principale.misurazioni = principale.misurazioni.concat(secondario.misurazioni || []);
+    principale.partiteUfficiali = principale.partiteUfficiali.concat(secondario.partiteUfficiali || []);
     if (!principale.foto && secondario.foto) principale.foto = secondario.foto;
     if (!principale.dataNascita && secondario.dataNascita) principale.dataNascita = secondario.dataNascita;
     if (!principale.squadra && secondario.squadra) principale.squadra = secondario.squadra;
@@ -7531,6 +7583,8 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
     v => [v.data, v.parametro, v.valoreNumerico, v.scout, (v.notaScritta || "").trim()].join("§"));
   principale.visionature = dedupeArray(principale.visionature,
     v => [v.data, v.luogo, v.scout || "", (v.note || "").trim()].join("§"));
+  principale.misurazioni = dedupeArray(principale.misurazioni, m => m.data);
+  principale.partiteUfficiali = dedupeArray(principale.partiteUfficiali, m => [m.data, m.avversario || ""].join("§"));
 
   players = players.filter(p => p.id === idPrincipale || !idsSecondari.includes(p.id));
   savePlayers();
@@ -7849,6 +7903,9 @@ function renderStrumenti(content) {
         if (!scelto) return;
         const idPrincipale = scelto.value;
         const idsSecondari = gruppo.map(p => p.id).filter(id => id !== idPrincipale);
+        const schedePrincipale = players.find(p => p.id === idPrincipale);
+        const nomiSecondari = gruppo.filter(p => idsSecondari.includes(p.id)).map(p => `${p.cognome} ${p.nome}`).join(", ");
+        if (!confirm(`Unire ${nomiSecondari} nella scheda di ${schedePrincipale ? schedePrincipale.cognome + " " + schedePrincipale.nome : "quella scelta"}? Le altre schede verranno eliminate definitivamente (visionature, valutazioni, misurazioni e partite verranno spostate su quella tenuta). Questa azione non si può annullare.`)) return;
         unisciGiocatori(idPrincipale, idsSecondari);
         renderGiocatoriDuplicati();
       };
@@ -7991,6 +8048,7 @@ function renderStrumenti(content) {
       btn.onclick = () => {
         const r = trovati[parseInt(btn.dataset.idx, 10)];
         const daEliminare = btn.dataset.keep === "2" ? r.data1 : r.data2;
+        if (!confirm(`Eliminare da ${r.nome} tutte le valutazioni e visionature del ${formatDataIt(daEliminare)}? Questa azione non si può annullare.`)) return;
         rimuoviVocePerData(r.playerId, daEliminare);
         renderQuasiDuplicati();
       };
@@ -8022,6 +8080,7 @@ function renderStrumenti(content) {
     const vecchio = document.getElementById("mnt-scout-source").value;
     const nuovo = document.getElementById("mnt-scout-target").value.trim();
     if (!vecchio || !nuovo) { alert("Scegli lo scout da sostituire e scrivi il nuovo nome."); return; }
+    if (!confirm(`Rinominare lo scout "${vecchio}" in "${nuovo}" su tutte le valutazioni? Dopo la rinomina, eventuali valutazioni diventate identiche (stessa data/parametro/valore/nota) verranno anche eliminate automaticamente come duplicati.`)) return;
     const conteggio = rinominaScout(vecchio, nuovo);
     const { rimosseValutazioni } = pulisciDuplicati();
     document.getElementById("mnt-scout-result").innerHTML =
@@ -9025,6 +9084,12 @@ function radunoCardHTML(r) {
 
 function renderRadunoForm(content) {
   const r = radunoCorrenteId ? raduni.find(x => x.id === radunoCorrenteId) : null;
+  // Se il raduno che si stava per modificare appartiene all'altro gruppo
+  // (U16/FCL) rispetto al tab attivo, non è valido qui: torniamo alla lista
+  // invece di rischiare di salvare modifiche sul raduno sbagliato (vedi il
+  // reset in switchTab per il caso normale; questo controllo è una seconda
+  // rete di sicurezza).
+  if (r && (r.gruppo || "u16") !== radunoGruppoAttivo()) { radunoCorrenteId = null; raduniSezione = "lista"; render(); return; }
   const eventiRaduno = eventi.filter(e => e.tipo === "Raduno").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
   content.innerHTML = `
     <div class="import-box">
@@ -9180,7 +9245,11 @@ function giocatoriSuggeritiRaduno(r) {
 
 function renderRadunoDettaglio(content) {
   const r = raduni.find(x => x.id === radunoCorrenteId);
-  if (!r) { raduniSezione = "lista"; render(); return; }
+  // Il raduno aperto deve appartenere al gruppo (U16/FCL) del tab attivo:
+  // altrimenti staremmo per mostrare/modificare la rosa del raduno
+  // dell'ALTRO gruppo (vedi il reset in switchTab per il caso normale;
+  // questo controllo è una seconda rete di sicurezza).
+  if (!r || (r.gruppo || "u16") !== radunoGruppoAttivo()) { raduniSezione = "lista"; radunoCorrenteId = null; render(); return; }
   const griglia = grigliaRaduno(r);
 
   // Conteggio giocatori per stato (Kaderspieler, Pikett-Spieler, ecc.), per
