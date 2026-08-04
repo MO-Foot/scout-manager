@@ -8790,6 +8790,21 @@ const REPARTI_GRID_PER_MODULO = {
   ]
 };
 
+// Alcune sigle del file Excel federale corrispondono, in certi moduli, a un
+// ruolo della griglia tattica con una chiave diversa: es. "MITTELFELD - OFF
+// (MFO)" è, quando il modulo prevede un trequartista, concettualmente lo
+// stesso ruolo dello slot "TRQ" (il file federale non usa mai la sigla TRQ).
+// Senza questo alias quei giocatori verrebbero lasciati come reparto
+// personalizzato invece di finire nello slot tattico corretto. Vale solo per
+// i moduli/chiavi elencati qui, non in generale.
+const CHIAVE_ALIAS_PER_MODULO = {
+  "1-4-3-1-2": { MFO: "TRQ" }
+};
+function chiaveEffettiva(chiaveGrezza, modulo) {
+  const alias = CHIAVE_ALIAS_PER_MODULO[modulo];
+  return (alias && alias[chiaveGrezza]) || chiaveGrezza;
+}
+
 // Righe della griglia tattica per il modulo del raduno (senza i reparti
 // personalizzati, che vengono mostrati a parte in una riga finale).
 function grigliaRaduno(raduno) {
@@ -9906,19 +9921,43 @@ function indizioSlotDaTesto(nomeOriginale, slotsChiave) {
 // stessa sigla ("FLÜGELSPIELER (STA)" per la fascia DX, "MITTELFELD AUSSEN
 // (MFA)" per quella SX) — per questo lo slot Flügel SX ha chiave "MFA" e non
 // "STA" nella griglia sopra, invece di affidarsi al round-robin.
+// NOTA blocco unico su più slot: a volte è vero il contrario — un'UNICA
+// colonna Excel (es. "MITTELFELD - PLAY (MFD)", un solo blocco da 8
+// giocatori) deve riempire PIÙ slot dello stesso ruolo nella griglia
+// (Mediano DX + Mediano SX), perché il file non distingue dx/sx per quel
+// reparto. Assegnando l'intero blocco a un solo slot, come fa il
+// round-robin per-reparto sopra, l'altro slot resterebbe visibilmente vuoto
+// e sembrerebbe che l'app non abbia riconosciuto quei giocatori (bug
+// segnalato dall'utente). In questo caso distribuiamo invece i singoli
+// giocatori a rotazione sui vari slot (rep.slotIdsPerGiocatore), invece del
+// blocco intero su un unico slot.
 function assegnaSlotDefaultImport(scheda) {
   const griglia = REPARTI_GRID_PER_MODULO[scheda.modulo] || REPARTI_GRID_PER_MODULO[MODULI_RADUNO[0]];
   const slotsPiatti = griglia.flat();
   const usoContatore = {};
-  scheda.reparti.forEach(rep => {
-    const slotsChiave = slotsPiatti.filter(s => s.chiave === rep.chiave);
-    let slotId = slotsChiave.length ? indizioSlotDaTesto(rep.nomeOriginale, slotsChiave) : null;
-    if (!slotId && slotsChiave.length) {
-      const i = usoContatore[rep.chiave] || 0;
-      slotId = slotsChiave[i % slotsChiave.length].id;
-      usoContatore[rep.chiave] = i + 1;
+  const chiaviEffettive = scheda.reparti.map(rep => chiaveEffettiva(rep.chiave, scheda.modulo));
+  const repartiPerChiave = {};
+  chiaviEffettive.forEach(c => { repartiPerChiave[c] = (repartiPerChiave[c] || 0) + 1; });
+
+  scheda.reparti.forEach((rep, idx) => {
+    const chiave = chiaviEffettive[idx];
+    const slotsChiave = slotsPiatti.filter(s => s.chiave === chiave);
+    rep.slotIdsPerGiocatore = null;
+    if (!slotsChiave.length) {
+      rep.slotIdDefault = rep.chiave;
+      return;
     }
-    rep.slotIdDefault = slotId || rep.chiave;
+    let slotId = indizioSlotDaTesto(rep.nomeOriginale, slotsChiave);
+    if (!slotId && slotsChiave.length > 1 && repartiPerChiave[chiave] === 1 && rep.giocatori.length > 1) {
+      rep.slotIdsPerGiocatore = rep.giocatori.map((g, i) => slotsChiave[i % slotsChiave.length].id);
+      slotId = rep.slotIdsPerGiocatore[0];
+    }
+    if (!slotId) {
+      const i = usoContatore[chiave] || 0;
+      slotId = slotsChiave[i % slotsChiave.length].id;
+      usoContatore[chiave] = i + 1;
+    }
+    rep.slotIdDefault = slotId;
   });
 }
 
@@ -9996,9 +10035,10 @@ function avviaVerificaImportRaduno(wb, nomiFogli, targetId, fileName) {
   schede.forEach(scheda => {
     assegnaSlotDefaultImport(scheda);
     scheda.reparti.forEach(rep => {
-      rep.candidati = rep.giocatori.map(g => {
+      rep.candidati = rep.giocatori.map((g, gIdx) => {
         const match = trovaGiocatoreCorrispondente(g.grezzo);
-        return { grezzo: g.grezzo, match, slotId: rep.slotIdDefault, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "", stato: g.stato || null, coloreGrezzo: g.coloreGrezzo || null };
+        const slotId = (rep.slotIdsPerGiocatore && rep.slotIdsPerGiocatore[gIdx]) || rep.slotIdDefault;
+        return { grezzo: g.grezzo, match, slotId, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "", stato: g.stato || null, coloreGrezzo: g.coloreGrezzo || null };
       });
     });
   });
@@ -10145,7 +10185,9 @@ function renderRadunoImporta(content) {
       // invece di lasciare gli slot calcolati sul modulo sbagliato.
       assegnaSlotDefaultImport(s);
       s.reparti.forEach(rep => {
-        rep.candidati.forEach(c => { c.slotId = rep.slotIdDefault; });
+        rep.candidati.forEach((c, cIdx) => {
+          c.slotId = (rep.slotIdsPerGiocatore && rep.slotIdsPerGiocatore[cIdx]) || rep.slotIdDefault;
+        });
       });
       render();
     });
@@ -10159,7 +10201,7 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
   // rilevato (es. varianti regionali). Li aggiungiamo come opzioni extra così
   // da non perdere nessun giocatore durante la revisione.
   const chiaviBase = new Set(slotsBase.map(r => r.chiave));
-  const chiaviExtra = [...new Set(s.reparti.map(r => r.chiave).filter(k => !chiaviBase.has(k)))];
+  const chiaviExtra = [...new Set(s.reparti.map(r => chiaveEffettiva(r.chiave, s.modulo)).filter(k => !chiaviBase.has(k)))];
   const repartiOptions = [...slotsBase, ...chiaviExtra.map(k => ({ id: k, chiave: k, nome: k, personalizzato: true }))];
   const totCandidati = s.reparti.reduce((n, rep) => n + rep.candidati.length, 0);
   const totMatch = s.reparti.reduce((n, rep) => n + rep.candidati.filter(c => c.match).length, 0);
