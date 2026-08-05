@@ -424,6 +424,7 @@ body{
   color: var(--chalk);
   cursor: pointer;
   transition: border-color .15s ease, background .15s ease;
+  white-space: nowrap;
 }
 .btn:hover{ border-color: var(--gold-dim); }
 .btn-primary{
@@ -1064,7 +1065,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   padding: 10px;
   margin-top: 8px;
 }
-.import-actions{ margin: 16px 0; }
+.import-actions{ margin: 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .candidato-card{
   border: 1px solid var(--line);
@@ -1421,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 05/08/2026 · 21:55</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 05/08/2026 · 21:59</div>
         </div>
       </div>
     </header>
