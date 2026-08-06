@@ -1415,7 +1415,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 16:20</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 17:05</div>
         </div>
       </div>
     </header>
@@ -2415,6 +2415,10 @@ let settimanaApertaPresenze = null;
 let presenzeSottoVista = "normale"; // "normale" | "reportNazionale"
 let reportNazPeriodoTipo = "settimana"; // "settimana" | "mese" | "anno"
 let reportNazAncora = null; // stringa ISO (YYYY-MM-DD) di riferimento nel periodo scelto; null = default automatico (ultimo periodo con partite)
+let reportNazTesto = ""; // ricerca per giocatore o squadra
+let reportNazSoloGiocato = false; // nasconde le righe "Nessuna partita in questo periodo"
+let reportNazOrdineCampo = "nome"; // "nome" | "minuti" | "gol"
+let reportNazOrdineDir = -1; // usato solo per minuti/gol: -1 = dal più alto (default), 1 = dal più basso
 
 /* ===================== Utility ===================== */
 function esc(str) {
@@ -7724,15 +7728,55 @@ function raccogliRigheGruppoReportNaz(raduno, inizioISO, fineISO) {
     const partite = (p.partiteUfficiali || [])
       .filter(m => m.data && m.data >= inizioISO && m.data <= fineISO)
       .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
-    const minutiTot = partite.reduce((s, m) => s + (typeof m.minutiGiocati === "number" ? m.minutiGiocati : 0), 0);
+    // Distinguiamo "0 minuti giocati" (dato noto) da "minutaggio non
+    // disponibile nel tabellino" (dato ignoto) — sommarli insieme come se
+    // fossero entrambi 0 avrebbe fatto sembrare "non ha giocato" un
+    // giocatore titolare di cui semplicemente non conosciamo i minuti.
+    let minutiTot = 0, minutiNoti = false, minutiIgnoti = false;
+    partite.forEach(m => {
+      if (typeof m.minutiGiocati === "number") { minutiTot += m.minutiGiocati; minutiNoti = true; }
+      else if (m.presenza === "Titolare" || m.presenza === "Subentrato") { minutiIgnoti = true; }
+    });
     const golTot = partite.reduce((s, m) => s + (typeof m.gol === "number" ? m.gol : 0), 0);
-    return { player: p, partite, minutiTot, golTot };
+    return { player: p, partite, minutiTot, minutiNoti, minutiIgnoti, golTot };
   }).filter(Boolean);
   righe.sort((a, b) => `${a.player.cognome} ${a.player.nome}`.localeCompare(`${b.player.cognome} ${b.player.nome}`, "it"));
   return righe;
 }
 
+// Applica ricerca testuale, il filtro "solo chi ha giocato" e l'ordinamento
+// scelto (nome/minuti/gol) a un gruppo di righe già raccolto. Tenuta
+// separata da raccogliRigheGruppoReportNaz così il conteggio "X/Y hanno
+// giocato in questo periodo" nell'intestazione resta sul TOTALE del
+// gruppo, non su quanto rimane dopo aver filtrato/cercato.
+function filtraOrdinaRigheReportNaz(righe) {
+  if (righe === null) return null;
+  const testo = reportNazTesto.trim().toLowerCase();
+  let risultato = righe.filter(r => {
+    if (reportNazSoloGiocato && !r.partite.length) return false;
+    if (testo) {
+      const haystack = `${r.player.cognome} ${r.player.nome} ${r.player.squadra || ""}`.toLowerCase();
+      if (!haystack.includes(testo)) return false;
+    }
+    return true;
+  });
+  if (reportNazOrdineCampo === "minuti") {
+    risultato = risultato.slice().sort((a, b) => (b.minutiTot - a.minutiTot) * reportNazOrdineDir
+      || `${a.player.cognome} ${a.player.nome}`.localeCompare(`${b.player.cognome} ${b.player.nome}`, "it"));
+  } else if (reportNazOrdineCampo === "gol") {
+    risultato = risultato.slice().sort((a, b) => (b.golTot - a.golTot) * reportNazOrdineDir
+      || `${a.player.cognome} ${a.player.nome}`.localeCompare(`${b.player.cognome} ${b.player.nome}`, "it"));
+  }
+  return risultato;
+}
+
 const REPORT_NAZ_PRESENZA_CLASSE = { "Titolare": "rating-good", "Subentrato": "rating-mid", "Panchina (non entrato)": "rating-na", "Non convocato": "rating-low" };
+
+function reportNazMinutiEtichetta(r) {
+  if (!r.minutiNoti && !r.minutiIgnoti) return "-";
+  if (!r.minutiNoti && r.minutiIgnoti) return "n/d";
+  return `${r.minutiTot}'${r.minutiIgnoti ? "+" : ""}`;
+}
 
 function reportNazRigaHTML(r) {
   if (!r.partite.length) {
@@ -7751,22 +7795,31 @@ function reportNazRigaHTML(r) {
   return `<tr data-id="${esc(r.player.id)}">
     <td>${esc(r.player.cognome)} ${esc(r.player.nome)}<div class="muted" style="font-size:12px;">${esc(r.player.squadra || "-")}</div></td>
     <td>${dettaglioPartite}</td>
-    <td class="mono">${r.minutiTot}'</td>
+    <td class="mono">${reportNazMinutiEtichetta(r)}</td>
     <td class="mono">${r.golTot || "-"}</td>
   </tr>`;
 }
 
-function reportNazSezioneHTML(titolo, righe) {
-  if (righe === null) {
+// intestazione di colonna cliccabile per ordinare per minuti/gol; mostra
+// una freccina quando è quella attiva, così si capisce anche la direzione.
+function reportNazIntestazioneOrdinabile(campo, etichetta) {
+  const attiva = reportNazOrdineCampo === campo;
+  const freccia = attiva ? (reportNazOrdineDir === -1 ? " ▼" : " ▲") : "";
+  return `<th class="report-naz-th-ordinabile" data-campo="${campo}" style="cursor:pointer; user-select:none;" title="Ordina per ${esc(etichetta)}">${esc(etichetta)}${freccia}</th>`;
+}
+
+function reportNazSezioneHTML(titolo, righeComplete, righeFiltrate) {
+  if (righeComplete === null) {
     return `<div class="report-naz-sezione"><h3>${esc(titolo)}</h3><p class="muted">Lista non trovata nel database: verifica che esista un raduno con questo nome.</p></div>`;
   }
-  const coinvolti = righe.filter(r => r.partite.length).length;
+  const coinvolti = righeComplete.filter(r => r.partite.length).length;
+  const nascosti = righeComplete.length - righeFiltrate.length;
   return `
     <div class="report-naz-sezione">
-      <h3>${esc(titolo)} <span class="muted" style="font-weight:400; font-size:13px;">— ${coinvolti}/${righe.length} hanno giocato in questo periodo</span></h3>
+      <h3>${esc(titolo)} <span class="muted" style="font-weight:400; font-size:13px;">— ${coinvolti}/${righeComplete.length} hanno giocato in questo periodo${nascosti ? ` · ${nascosti} nascosti dai filtri` : ""}</span></h3>
       <table class="tabella-giocatori tabella-presenze">
-        <thead><tr><th>Giocatore</th><th>Partite</th><th>Min. totali</th><th>Gol</th></tr></thead>
-        <tbody>${righe.map(reportNazRigaHTML).join("") || `<tr><td colspan="4" class="muted">Nessun giocatore in questa lista.</td></tr>`}</tbody>
+        <thead><tr><th>Giocatore</th><th>Partite</th>${reportNazIntestazioneOrdinabile("minuti", "Min. totali")}${reportNazIntestazioneOrdinabile("gol", "Gol")}</tr></thead>
+        <tbody>${righeFiltrate.map(reportNazRigaHTML).join("") || `<tr><td colspan="4" class="muted">Nessun giocatore corrisponde ai filtri.</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -7779,6 +7832,8 @@ function renderReportNazionale(content) {
 
   const gruppoTYT = raccogliRigheGruppoReportNaz(radunoTYT, inizioISO, fineISO);
   const gruppoKaderA = raccogliRigheGruppoReportNaz(radunoKaderA, inizioISO, fineISO);
+  const gruppoTYTFiltrato = filtraOrdinaRigheReportNaz(gruppoTYT);
+  const gruppoKaderAFiltrato = filtraOrdinaRigheReportNaz(gruppoKaderA);
 
   content.innerHTML = `
     <div class="filtri-bar" id="report-naz-nav">
@@ -7793,15 +7848,34 @@ function renderReportNazionale(content) {
       <button class="btn btn-ghost btn-sm" id="rn-btn-next" title="Periodo successivo">▶</button>
       <button class="btn btn-primary btn-sm" id="rn-btn-stampa" style="margin-left:auto;">Stampa / Salva PDF</button>
     </div>
-    ${reportNazSezioneHTML("Rosa Nazionale U16 TYT (2011)", gruppoTYT)}
-    ${reportNazSezioneHTML("Rosa Nazionale U16 Kader A (2011)", gruppoKaderA)}
+    <div class="filtri-bar" id="report-naz-filtri">
+      <input type="text" id="rn-testo" class="f-input f-testo" placeholder="Cerca giocatore o squadra..." value="${esc(reportNazTesto)}">
+      <label style="display:flex; align-items:center; gap:6px; white-space:nowrap;">
+        <input type="checkbox" id="rn-solo-giocato" ${reportNazSoloGiocato ? "checked" : ""}>
+        Solo chi ha giocato
+      </label>
+      <span class="muted" style="font-size:12.5px;">Clicca "Min. totali" o "Gol" nell'intestazione per ordinare</span>
+    </div>
+    ${reportNazSezioneHTML("Rosa Nazionale U16 TYT (2011)", gruppoTYT, gruppoTYTFiltrato)}
+    ${reportNazSezioneHTML("Rosa Nazionale U16 Kader A (2011)", gruppoKaderA, gruppoKaderAFiltrato)}
   `;
 
   document.getElementById("rn-btn-indietro").onclick = () => { presenzeSottoVista = "normale"; render(); };
   document.getElementById("rn-tipo-periodo").onchange = e => { reportNazPeriodoTipo = e.target.value; render(); };
   document.getElementById("rn-btn-prev").onclick = () => { reportNazSpostaPeriodo(-1); render(); };
   document.getElementById("rn-btn-next").onclick = () => { reportNazSpostaPeriodo(1); render(); };
-  document.getElementById("rn-btn-stampa").onclick = () => stampaReportNazionale(etichetta, gruppoTYT, gruppoKaderA);
+  document.getElementById("rn-btn-stampa").onclick = () => stampaReportNazionale(etichetta, gruppoTYTFiltrato, gruppoKaderAFiltrato);
+  document.getElementById("rn-testo").oninput = e => { reportNazTesto = e.target.value; render(); };
+  document.getElementById("rn-solo-giocato").onchange = e => { reportNazSoloGiocato = e.target.checked; render(); };
+
+  content.querySelectorAll(".report-naz-th-ordinabile").forEach(th => {
+    th.onclick = () => {
+      const campo = th.dataset.campo;
+      if (reportNazOrdineCampo === campo) reportNazOrdineDir *= -1;
+      else { reportNazOrdineCampo = campo; reportNazOrdineDir = -1; }
+      render();
+    };
+  });
 
   content.querySelectorAll(".report-naz-sezione tr[data-id]").forEach(tr => {
     tr.style.cursor = "pointer";
@@ -7824,7 +7898,7 @@ function stampaReportNazionale(etichetta, gruppoTYT, gruppoKaderA) {
           <td>${r.partite.length ? r.partite.map(m => `
               <div>${formatDataIt(m.data)}${m.presenza ? ` — <span style="color:${PRESENZA_CLASSE_STAMPA[m.presenza] || "#333"};">${esc(m.presenza)}</span>` : ""} — ${esc(m.squadra || "?")} vs ${esc(m.avversario || "?")}${m.risultato ? ` (${esc(m.risultato)})` : ""}${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? ` · ${esc(m.minutiGiocati)}'` : ""}${m.gol ? ` · ${esc(m.gol)} gol` : ""}</div>
             `).join("") : `<span class="stampa-sottotitolo">Nessuna partita in questo periodo</span>`}</td>
-          <td>${r.minutiTot}'</td>
+          <td>${reportNazMinutiEtichetta(r)}</td>
           <td>${r.golTot || "-"}</td>
         </tr>`).join("")}</tbody>
     </table>`;
