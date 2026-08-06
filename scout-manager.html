@@ -1415,7 +1415,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 15:35</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 16:20</div>
         </div>
       </div>
     </header>
@@ -2407,6 +2407,14 @@ let filtroScouts = new Set();
 let filtroPresenzeTesto = "";
 let filtroPresenzeCompetizione = "tutte";
 let settimanaApertaPresenze = null;
+
+// Sotto-vista "Report Nazionale U16 TYT / Kader A" dentro la scheda Presenze:
+// un report stampabile, filtrato alle due rose nazionali, con un periodo
+// (settimana/mese/anno) navigabile avanti/indietro invece del solito elenco
+// libero di tutte le presenze.
+let presenzeSottoVista = "normale"; // "normale" | "reportNazionale"
+let reportNazPeriodoTipo = "settimana"; // "settimana" | "mese" | "anno"
+let reportNazAncora = null; // stringa ISO (YYYY-MM-DD) di riferimento nel periodo scelto; null = default automatico (ultimo periodo con partite)
 
 /* ===================== Utility ===================== */
 function esc(str) {
@@ -4054,6 +4062,7 @@ function render(editPlayer) {
   const chiaveVista = (currentTab === "raduni" || currentTab === "raduniFcl") ? `${currentTab}|${raduniSezione}|${radunoCorrenteId || ""}|${raduniSezione === "allenamenti" ? allenamentiVista + "|" + (allenamentoCorrenteId || "") : ""}`
     : currentTab === "allenatori" ? `allenatori|${allenatoriSezione}|${allenatoreCorrenteId || ""}`
     : currentTab === "esercizi" ? `esercizi|${eserciziSezione}|${esercizioCorrenteId || ""}`
+    : currentTab === "presenze" ? `presenze|${presenzeSottoVista}`
     : currentTab;
   const stessaVista = chiaveVista === ultimaChiaveVistaRender;
   const scrollDaMantenere = stessaVista ? window.scrollY : 0;
@@ -7544,6 +7553,8 @@ function formatRangeSettimana(lun, dom) {
 }
 
 function renderPresenze(content) {
+  if (presenzeSottoVista === "reportNazionale") { renderReportNazionale(content); return; }
+
   const righe = [];
   players.forEach(p => {
     (p.partiteUfficiali || []).forEach(m => {
@@ -7634,12 +7645,14 @@ function renderPresenze(content) {
         <option value="tutte">Tutte le competizioni</option>
         ${competizioniTutte.map(c => `<option value="${esc(c)}" ${filtroPresenzeCompetizione === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
       </select>
+      <button class="btn btn-ghost btn-sm" id="fp-btn-report-naz">📋 Report Nazionale U16</button>
     </div>
     <div class="presenze-lista">${settimaneHTML}</div>
   `;
 
   document.getElementById("fp-testo").oninput = e => { filtroPresenzeTesto = e.target.value; renderPresenze(content); };
   document.getElementById("fp-competizione").onchange = e => { filtroPresenzeCompetizione = e.target.value; renderPresenze(content); };
+  document.getElementById("fp-btn-report-naz").onclick = () => { presenzeSottoVista = "reportNazionale"; render(); };
 
   content.querySelectorAll(".presenze-settimana").forEach(det => {
     det.addEventListener("toggle", () => { if (det.open) settimanaApertaPresenze = det.dataset.key; });
@@ -7648,6 +7661,203 @@ function renderPresenze(content) {
   content.querySelectorAll(".tabella-presenze tr[data-id]").forEach(tr => {
     tr.onclick = () => apriDettaglio(tr.dataset.id);
   });
+}
+
+/* ============== Report Nazionale U16 (TYT / Kader A) ============== */
+// Trova il raduno-lista che fa da "rosa di riferimento" cercando una
+// sottostringa nel nome (es. "nazionale u16 tyt") invece di usare un id
+// fisso, così il report continua a funzionare anche se il raduno viene
+// ricreato o l'id cambia in un futuro export.
+function trovaRadunoPerNome(sottostringa) {
+  const s = sottostringa.toLowerCase();
+  return raduni.find(r => (r.nome || "").toLowerCase().includes(s));
+}
+
+function reportNazPeriodoAttuale() {
+  const ancoraData = new Date((reportNazAncora || reportNazDataDefault()) + "T00:00:00");
+  if (reportNazPeriodoTipo === "settimana") {
+    const lun = lunediSettimanaDi(isoLocale(ancoraData));
+    const dom = domenicaSettimanaDi(lun);
+    return { inizio: lun, fine: dom, etichetta: `Settimana ${formatRangeSettimana(lun, dom)}` };
+  }
+  if (reportNazPeriodoTipo === "mese") {
+    const inizio = new Date(ancoraData.getFullYear(), ancoraData.getMonth(), 1);
+    const fine = new Date(ancoraData.getFullYear(), ancoraData.getMonth() + 1, 0);
+    const etichettaGrezza = inizio.toLocaleDateString("it-IT", { month: "long", year: "numeric" });
+    return { inizio, fine, etichetta: etichettaGrezza.charAt(0).toUpperCase() + etichettaGrezza.slice(1) };
+  }
+  // anno
+  const inizio = new Date(ancoraData.getFullYear(), 0, 1);
+  const fine = new Date(ancoraData.getFullYear(), 11, 31);
+  return { inizio, fine, etichetta: `Anno ${ancoraData.getFullYear()}` };
+}
+
+function reportNazSpostaPeriodo(direzione) {
+  const { inizio } = reportNazPeriodoAttuale();
+  const d = new Date(inizio);
+  if (reportNazPeriodoTipo === "settimana") d.setDate(d.getDate() + 7 * direzione);
+  else if (reportNazPeriodoTipo === "mese") d.setMonth(d.getMonth() + direzione);
+  else d.setFullYear(d.getFullYear() + direzione);
+  reportNazAncora = isoLocale(d);
+}
+
+// Default: l'ultima data con almeno una partita registrata tra i giocatori
+// delle due rose (così il report si apre già sul periodo più recente con
+// dati, invece che sulla settimana corrente probabilmente vuota).
+function reportNazDataDefault() {
+  const radunoTYT = trovaRadunoPerNome("nazionale u16 tyt");
+  const radunoKaderA = trovaRadunoPerNome("nazionale u16 kader a");
+  const ids = new Set([...(radunoTYT ? radunoTYT.rosa : []), ...(radunoKaderA ? radunoKaderA.rosa : [])].map(r => r.giocatoreId));
+  let maxData = null;
+  players.forEach(p => {
+    if (!ids.has(p.id)) return;
+    (p.partiteUfficiali || []).forEach(m => { if (m.data && (!maxData || m.data > maxData)) maxData = m.data; });
+  });
+  return maxData || isoLocale(new Date());
+}
+
+function raccogliRigheGruppoReportNaz(raduno, inizioISO, fineISO) {
+  if (!raduno) return null;
+  const righe = (raduno.rosa || []).map(row => {
+    const p = players.find(x => x.id === row.giocatoreId);
+    if (!p) return null;
+    const partite = (p.partiteUfficiali || [])
+      .filter(m => m.data && m.data >= inizioISO && m.data <= fineISO)
+      .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+    const minutiTot = partite.reduce((s, m) => s + (typeof m.minutiGiocati === "number" ? m.minutiGiocati : 0), 0);
+    const golTot = partite.reduce((s, m) => s + (typeof m.gol === "number" ? m.gol : 0), 0);
+    return { player: p, partite, minutiTot, golTot };
+  }).filter(Boolean);
+  righe.sort((a, b) => `${a.player.cognome} ${a.player.nome}`.localeCompare(`${b.player.cognome} ${b.player.nome}`, "it"));
+  return righe;
+}
+
+const REPORT_NAZ_PRESENZA_CLASSE = { "Titolare": "rating-good", "Subentrato": "rating-mid", "Panchina (non entrato)": "rating-na", "Non convocato": "rating-low" };
+
+function reportNazRigaHTML(r) {
+  if (!r.partite.length) {
+    return `<tr data-id="${esc(r.player.id)}">
+      <td>${esc(r.player.cognome)} ${esc(r.player.nome)}<div class="muted" style="font-size:12px;">${esc(r.player.squadra || "-")}</div></td>
+      <td class="muted" colspan="3">Nessuna partita in questo periodo</td>
+    </tr>`;
+  }
+  const dettaglioPartite = r.partite.map(m => `
+    <div style="margin-top:4px;">
+      <span class="mono">${formatDataIt(m.data)}</span>
+      ${m.presenza ? ` — <span class="${REPORT_NAZ_PRESENZA_CLASSE[m.presenza] || ""}">${esc(m.presenza)}</span>` : ""}
+      — ${esc(m.squadra || "?")} vs ${esc(m.avversario || "?")}${m.risultato ? ` (${esc(m.risultato)})` : ""}
+      ${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? ` · ${esc(m.minutiGiocati)}'` : ""}${m.gol ? ` · ${esc(m.gol)} gol` : ""}
+    </div>`).join("");
+  return `<tr data-id="${esc(r.player.id)}">
+    <td>${esc(r.player.cognome)} ${esc(r.player.nome)}<div class="muted" style="font-size:12px;">${esc(r.player.squadra || "-")}</div></td>
+    <td>${dettaglioPartite}</td>
+    <td class="mono">${r.minutiTot}'</td>
+    <td class="mono">${r.golTot || "-"}</td>
+  </tr>`;
+}
+
+function reportNazSezioneHTML(titolo, righe) {
+  if (righe === null) {
+    return `<div class="report-naz-sezione"><h3>${esc(titolo)}</h3><p class="muted">Lista non trovata nel database: verifica che esista un raduno con questo nome.</p></div>`;
+  }
+  const coinvolti = righe.filter(r => r.partite.length).length;
+  return `
+    <div class="report-naz-sezione">
+      <h3>${esc(titolo)} <span class="muted" style="font-weight:400; font-size:13px;">— ${coinvolti}/${righe.length} hanno giocato in questo periodo</span></h3>
+      <table class="tabella-giocatori tabella-presenze">
+        <thead><tr><th>Giocatore</th><th>Partite</th><th>Min. totali</th><th>Gol</th></tr></thead>
+        <tbody>${righe.map(reportNazRigaHTML).join("") || `<tr><td colspan="4" class="muted">Nessun giocatore in questa lista.</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderReportNazionale(content) {
+  const radunoTYT = trovaRadunoPerNome("nazionale u16 tyt");
+  const radunoKaderA = trovaRadunoPerNome("nazionale u16 kader a");
+  const { inizio, fine, etichetta } = reportNazPeriodoAttuale();
+  const inizioISO = isoLocale(inizio), fineISO = isoLocale(fine);
+
+  const gruppoTYT = raccogliRigheGruppoReportNaz(radunoTYT, inizioISO, fineISO);
+  const gruppoKaderA = raccogliRigheGruppoReportNaz(radunoKaderA, inizioISO, fineISO);
+
+  content.innerHTML = `
+    <div class="filtri-bar" id="report-naz-nav">
+      <button class="btn btn-ghost btn-sm" id="rn-btn-indietro">← Torna a Presenze</button>
+      <select id="rn-tipo-periodo" class="f-input" style="max-width:140px;">
+        <option value="settimana" ${reportNazPeriodoTipo === "settimana" ? "selected" : ""}>Settimana</option>
+        <option value="mese" ${reportNazPeriodoTipo === "mese" ? "selected" : ""}>Mese</option>
+        <option value="anno" ${reportNazPeriodoTipo === "anno" ? "selected" : ""}>Anno</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" id="rn-btn-prev" title="Periodo precedente">◀</button>
+      <strong style="align-self:center; white-space:nowrap;">${esc(etichetta)}</strong>
+      <button class="btn btn-ghost btn-sm" id="rn-btn-next" title="Periodo successivo">▶</button>
+      <button class="btn btn-primary btn-sm" id="rn-btn-stampa" style="margin-left:auto;">Stampa / Salva PDF</button>
+    </div>
+    ${reportNazSezioneHTML("Rosa Nazionale U16 TYT (2011)", gruppoTYT)}
+    ${reportNazSezioneHTML("Rosa Nazionale U16 Kader A (2011)", gruppoKaderA)}
+  `;
+
+  document.getElementById("rn-btn-indietro").onclick = () => { presenzeSottoVista = "normale"; render(); };
+  document.getElementById("rn-tipo-periodo").onchange = e => { reportNazPeriodoTipo = e.target.value; render(); };
+  document.getElementById("rn-btn-prev").onclick = () => { reportNazSpostaPeriodo(-1); render(); };
+  document.getElementById("rn-btn-next").onclick = () => { reportNazSpostaPeriodo(1); render(); };
+  document.getElementById("rn-btn-stampa").onclick = () => stampaReportNazionale(etichetta, gruppoTYT, gruppoKaderA);
+
+  content.querySelectorAll(".report-naz-sezione tr[data-id]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.onclick = () => apriDettaglio(tr.dataset.id);
+  });
+}
+
+function stampaReportNazionale(etichetta, gruppoTYT, gruppoKaderA) {
+  const PRESENZA_CLASSE_STAMPA = { "Titolare": "#1a7a3c", "Subentrato": "#a06a00", "Panchina (non entrato)": "#666", "Non convocato": "#a33" };
+
+  const tabellaStampa = righe => {
+    if (righe === null) return `<p class="stampa-sottotitolo">Lista non trovata nel database.</p>`;
+    if (!righe.length) return `<p class="stampa-sottotitolo">Nessun giocatore in questa lista.</p>`;
+    return `<table class="stampa-tabella">
+      <thead><tr><th>Giocatore</th><th>Squadra</th><th>Partite</th><th>Min. tot.</th><th>Gol</th></tr></thead>
+      <tbody>${righe.map(r => `
+        <tr>
+          <td>${esc(r.player.cognome)} ${esc(r.player.nome)}</td>
+          <td>${esc(r.player.squadra || "-")}</td>
+          <td>${r.partite.length ? r.partite.map(m => `
+              <div>${formatDataIt(m.data)}${m.presenza ? ` — <span style="color:${PRESENZA_CLASSE_STAMPA[m.presenza] || "#333"};">${esc(m.presenza)}</span>` : ""} — ${esc(m.squadra || "?")} vs ${esc(m.avversario || "?")}${m.risultato ? ` (${esc(m.risultato)})` : ""}${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? ` · ${esc(m.minutiGiocati)}'` : ""}${m.gol ? ` · ${esc(m.gol)} gol` : ""}</div>
+            `).join("") : `<span class="stampa-sottotitolo">Nessuna partita in questo periodo</span>`}</td>
+          <td>${r.minutiTot}'</td>
+          <td>${r.golTot || "-"}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+  };
+
+  const html = `<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8">
+    <title>Report Nazionale U16 — ${esc(etichetta)}</title>
+    <style>
+      body{ font-family: -apple-system, Arial, sans-serif; color:#111; margin:24px; font-size:12.5px; }
+      h1{ font-size:19px; margin-bottom:2px; }
+      h2{ font-size:14.5px; margin-top:26px; border-bottom:1px solid #999; padding-bottom:4px; }
+      .stampa-sottotitolo{ color:#555; font-size:12px; margin:0; }
+      .stampa-tabella{ width:100%; border-collapse:collapse; margin-top:8px; }
+      .stampa-tabella th, .stampa-tabella td{ border:1px solid #ccc; padding:5px 7px; text-align:left; vertical-align:top; }
+      .stampa-tabella th{ background:#eee; }
+      .stampa-tabella tr{ break-inside: avoid; }
+      @media print{ @page{ size: A4 landscape; margin:14mm; } }
+    </style>
+  </head><body>
+    <h1>Report Nazionale U16 — TYT / Kader A (2011)</h1>
+    <p class="stampa-sottotitolo">Periodo: ${esc(etichetta)} — generato il ${new Date().toLocaleDateString("it-IT")}</p>
+    <h2>Rosa Nazionale U16 TYT (2011)</h2>
+    ${tabellaStampa(gruppoTYT)}
+    <h2>Rosa Nazionale U16 Kader A (2011)</h2>
+    ${tabellaStampa(gruppoKaderA)}
+  </body></html>`;
+
+  const finestra = window.open("", "_blank");
+  if (!finestra) { alert("Il browser ha bloccato l'apertura della finestra di stampa: consenti i popup per questo sito e riprova."); return; }
+  finestra.document.write(html);
+  finestra.document.close();
+  finestra.focus();
+  setTimeout(() => { finestra.print(); }, 300);
 }
 
 function renderStrumenti(content) {
