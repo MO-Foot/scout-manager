@@ -1415,7 +1415,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 15:10</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 15:35</div>
         </div>
       </div>
     </header>
@@ -4915,6 +4915,7 @@ function apriDettaglio(id) {
         ${m.competizione ? `<br><span class="muted">${esc(m.competizione)}</span>` : ""}
         ${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) || m.gol ? `<br><span class="muted">${m.minutiGiocati !== null && m.minutiGiocati !== undefined ? esc(m.minutiGiocati) + "' giocati" : ""}${m.gol ? (m.minutiGiocati !== null && m.minutiGiocati !== undefined ? ", " : "") + esc(m.gol) + " gol" : ""}</span>` : ""}
         ${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ""}
+        ${m.link ? `<br><a href="${esc(m.link)}" target="_blank" rel="noopener">Vedi tabellino ↗</a>` : ""}
       </li>`)
     .join("") || "<li class='muted'>Nessuna partita registrata.</li>";
 
