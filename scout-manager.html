@@ -424,7 +424,6 @@ body{
   color: var(--chalk);
   cursor: pointer;
   transition: border-color .15s ease, background .15s ease;
-  white-space: nowrap;
 }
 .btn:hover{ border-color: var(--gold-dim); }
 .btn-primary{
@@ -861,10 +860,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
 .mirwald-body{ margin-top: 12px; }
 .modal-list{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .modal-list li{ font-size: 13.5px; }
-.partita-link{ display: inline-block; margin-top: 4px; font-size: 12.5px; color: var(--gold); text-decoration: none; }
-.partita-link:hover{ text-decoration: underline; }
 .modal-actions{ margin-top: 22px; display: flex; gap: 10px; }
-.modal-actions-top{ margin: 4px 0 18px; display: flex; gap: 10px; justify-content: flex-end; }
 .mono{ font-family: var(--font-mono); color: var(--chalk); }
 .muted{ color: var(--muted); }
 .rating-inline{ font-family: var(--font-mono); padding: 1px 7px; border: 1px dashed var(--line); border-radius: 20px; font-size: 12px; }
@@ -901,9 +897,6 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   max-width: 760px;
 }
 .player-form h2{ font-family: var(--font-display); font-size: 26px; margin: 0 0 16px; letter-spacing: 0.02em; }
-.form-actions-top{ display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.form-actions-top h2{ margin: 0 0 16px; }
-.form-actions-top-buttons{ display: flex; gap: 8px; margin-bottom: 16px; }
 .form-grid{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1065,7 +1058,7 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
   padding: 10px;
   margin-top: 8px;
 }
-.import-actions{ margin: 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.import-actions{ margin: 16px 0; }
 
 .candidato-card{
   border: 1px solid var(--line);
@@ -1422,7 +1415,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 10:04</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 15:10</div>
         </div>
       </div>
     </header>
@@ -1633,11 +1626,7 @@ function coloreePiazzamento(chiave) {
 
 function renderRadunoAllenamenti(content) {
   const r = raduni.find(x => x.id === radunoCorrenteId);
-  // Il raduno aperto deve appartenere al gruppo (U16/FCL) del tab attivo:
-  // altrimenti staremmo per mostrare/modificare gli allenamenti del raduno
-  // dell'ALTRO gruppo (vedi il reset in switchTab per il caso normale; questo
-  // controllo è una seconda rete di sicurezza).
-  if (!r || (r.gruppo || "u16") !== radunoGruppoAttivo()) { raduniSezione = "lista"; radunoCorrenteId = null; render(); return; }
+  if (!r) { raduniSezione = "lista"; render(); return; }
   r.allenamenti = r.allenamenti || [];
   if (allenamentiVista === "form") { renderAllenamentoForm(content, r); return; }
   renderAllenamentiLista(content, r);
@@ -3086,31 +3075,7 @@ async function caricaSuDropbox() {
   } catch (e) { ultimoContentHashRemoto = null; }
 }
 
-// savePlayers() viene chiamata a raffica (~40 punti diversi: ogni modifica,
-// ogni trascinamento, ogni import) senza mai essere "await-ata" da chi la
-// chiama, e la sincronizzazione automatica alla riconnessione
-// (sincronizzaSeInSospeso, sotto) può scattare in qualunque momento tramite
-// l'evento "online". Se lasciassimo partire più operazioni Dropbox in
-// parallelo, le richieste di rete potrebbero arrivare fuori ordine: quella
-// più lenta, basata su uno snapshot dei dati più vecchio, rischierebbe di
-// sovrascrivere silenziosamente su Dropbox un salvataggio più recente già
-// andato a buon fine. eseguiInCodaDropbox() mette in fila tutte le funzioni
-// che toccano Dropbox (usata sia da savePlayers che da
-// sincronizzaSeInSospeso più sotto): ognuna aspetta che la precedente sia
-// completamente finita prima di partire, così non ce n'è mai più di una
-// in corso alla volta.
-let codaDropboxInCorso = Promise.resolve();
-function eseguiInCodaDropbox(fn) {
-  const risultato = codaDropboxInCorso.then(fn, fn);
-  codaDropboxInCorso = risultato.catch(() => {}); // un fallimento non deve bloccare le richieste successive in coda
-  return risultato;
-}
-
-function savePlayers() {
-  return eseguiInCodaDropbox(eseguiSalvataggioPlayers);
-}
-
-async function eseguiSalvataggioPlayers() {
+async function savePlayers() {
   // Prima di tutto: salva sempre una copia sul dispositivo, connessi o
   // no a Dropbox, online o offline — così nessuna modifica va mai persa
   // anche se manca la connessione o si chiude la pagina.
@@ -3150,26 +3115,21 @@ async function eseguiSalvataggioPlayers() {
 // Prova a sincronizzare con Dropbox le modifiche fatte mentre eri
 // offline. Chiamata sia quando il browser segnala il ritorno della
 // connessione, sia manualmente (pulsante nella barra di stato).
-function sincronizzaSeInSospeso() {
+async function sincronizzaSeInSospeso() {
   if (!dropboxConnesso || !sincronizzazioneInSospeso) return;
-  // In coda con savePlayers() (vedi eseguiInCodaDropbox sopra): l'evento
-  // "online" può scattare mentre un salvataggio manuale è già a metà, e le
-  // due chiamate a caricaSuDropbox() non devono mai sovrapporsi.
-  return eseguiInCodaDropbox(async () => {
-    try {
-      await assicuraTokenValido();
-      await caricaSuDropbox();
-      sincronizzazioneInSospeso = false;
-      await idbSet(CHIAVE_SYNC_IN_SOSPESO, false).catch(() => {});
-      renderDropboxStatusBar("connesso");
-      eseguiBackupAutomaticoSeNecessario();
-    } catch (e) {
-      console.error("Sincronizzazione automatica fallita", e);
-      if (!sembraOffline(e)) renderDropboxStatusBar("errore", e.message);
-      // se è ancora offline non facciamo nulla: si riproverà al prossimo
-      // evento "online" o salvataggio.
-    }
-  });
+  try {
+    await assicuraTokenValido();
+    await caricaSuDropbox();
+    sincronizzazioneInSospeso = false;
+    await idbSet(CHIAVE_SYNC_IN_SOSPESO, false).catch(() => {});
+    renderDropboxStatusBar("connesso");
+    eseguiBackupAutomaticoSeNecessario();
+  } catch (e) {
+    console.error("Sincronizzazione automatica fallita", e);
+    if (!sembraOffline(e)) renderDropboxStatusBar("errore", e.message);
+    // se è ancora offline non facciamo nulla: si riproverà al prossimo
+    // evento "online" o salvataggio.
+  }
 }
 
 window.addEventListener("online", () => { sincronizzaSeInSospeso(); });
@@ -3808,11 +3768,13 @@ function renderDropboxStatusBar(stato, messaggioErrore) {
         <button class="btn btn-ghost btn-sm" id="fs-btn-ricarica">Ricarica da Dropbox</button>
         <button class="btn btn-ghost btn-sm" id="fs-btn-percorso">Cambia percorso file</button>
         <button class="btn btn-ghost btn-sm" id="fs-btn-export">Scarica copia (.json)</button>
+        <label class="btn btn-ghost btn-sm file-label" id="fs-btn-import" title="Importa un file .json (es. quello preparato settimanalmente) e sostituisci i dati attuali">Importa JSON<input type="file" id="fs-input-import" accept="application/json"></label>
         <button class="btn btn-ghost btn-sm" id="fs-btn-disconnetti">Disconnetti</button>
       </span>`;
     document.getElementById("fs-btn-ricarica").onclick = ricaricaDaDropbox;
     document.getElementById("fs-btn-percorso").onclick = cambiaPercorsoDropbox;
     document.getElementById("fs-btn-export").onclick = esportaBackup;
+    document.getElementById("fs-input-import").onchange = importaBackup;
     document.getElementById("fs-btn-disconnetti").onclick = disconnettiDropbox;
     return;
   }
@@ -3825,9 +3787,11 @@ function renderDropboxStatusBar(stato, messaggioErrore) {
       <span class="fs-actions">
         <button class="btn btn-ghost btn-sm" id="fs-btn-riprova-sync">Riprova ora</button>
         <button class="btn btn-ghost btn-sm" id="fs-btn-export">Scarica copia (.json)</button>
+        <label class="btn btn-ghost btn-sm file-label" id="fs-btn-import" title="Importa un file .json (es. quello preparato settimanalmente) e sostituisci i dati attuali">Importa JSON<input type="file" id="fs-input-import" accept="application/json"></label>
       </span>`;
     document.getElementById("fs-btn-riprova-sync").onclick = sincronizzaSeInSospeso;
     document.getElementById("fs-btn-export").onclick = esportaBackup;
+    document.getElementById("fs-input-import").onchange = importaBackup;
     return;
   }
 
@@ -3839,10 +3803,12 @@ function renderDropboxStatusBar(stato, messaggioErrore) {
       <span class="fs-actions">
         <button class="btn btn-ghost btn-sm" id="fs-btn-ricarica">Riprova</button>
         <button class="btn btn-ghost btn-sm" id="fs-btn-export">Scarica copia (.json)</button>
+        <label class="btn btn-ghost btn-sm file-label" id="fs-btn-import" title="Importa un file .json (es. quello preparato settimanalmente) e sostituisci i dati attuali">Importa JSON<input type="file" id="fs-input-import" accept="application/json"></label>
         <button class="btn btn-ghost btn-sm" id="fs-btn-disconnetti">Disconnetti e riconnetti</button>
       </span>`;
     document.getElementById("fs-btn-ricarica").onclick = ricaricaDaDropbox;
     document.getElementById("fs-btn-export").onclick = esportaBackup;
+    document.getElementById("fs-input-import").onchange = importaBackup;
     document.getElementById("fs-btn-disconnetti").onclick = disconnettiDropbox;
     return;
   }
@@ -4065,21 +4031,6 @@ async function boot() {
 
 
 function switchTab(tab, editPlayer) {
-  // Se si passa da un gruppo di raduni all'altro (Raduni U16 <-> Raduni FCL),
-  // resettiamo la navigazione interna dei raduni: senza questo, radunoCorrenteId
-  // e raduniSezione restavano quelli del tab precedente, e la nuova scheda
-  // mostrava/lasciava modificare in silenzio il raduno DELL'ALTRO gruppo (bug
-  // che ha causato la cancellazione accidentale di giocatori Nazionale U16
-  // mentre si credeva di essere nella scheda Raduni FCL, o viceversa).
-  const eraRaduni = currentTab === "raduni" || currentTab === "raduniFcl";
-  const vaARaduni = tab === "raduni" || tab === "raduniFcl";
-  if (eraRaduni && vaARaduni && tab !== currentTab) {
-    raduniSezione = "lista";
-    radunoCorrenteId = null;
-    radunoImportBozza = null;
-    allenamentiVista = "lista";
-    allenamentoCorrenteId = null;
-  }
   currentTab = tab;
   document.querySelectorAll(".navtab").forEach(el => el.classList.remove("active"));
   const navAttivo = document.getElementById("nav-" + tab);
@@ -4964,7 +4915,6 @@ function apriDettaglio(id) {
         ${m.competizione ? `<br><span class="muted">${esc(m.competizione)}</span>` : ""}
         ${(m.minutiGiocati !== null && m.minutiGiocati !== undefined) || m.gol ? `<br><span class="muted">${m.minutiGiocati !== null && m.minutiGiocati !== undefined ? esc(m.minutiGiocati) + "' giocati" : ""}${m.gol ? (m.minutiGiocati !== null && m.minutiGiocati !== undefined ? ", " : "") + esc(m.gol) + " gol" : ""}</span>` : ""}
         ${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ""}
-        ${m.link ? `<br><a href="${esc(m.link)}" target="_blank" rel="noopener" class="partita-link no-print" onclick="event.stopPropagation()">🔗 Apri tabellino</a>` : ""}
       </li>`)
     .join("") || "<li class='muted'>Nessuna partita registrata.</li>";
 
@@ -4998,9 +4948,6 @@ function apriDettaglio(id) {
           </div>
           <div class="card-badge large ${ratingClass(media)}">${media !== null ? media.toFixed(1) : "-"}</div>
           <div class="modal-radar">${radarChartSVG(medieTips(p, filtroScouts), { size: 108, showLabels: true })}</div>
-        </div>
-        <div class="modal-actions-top no-print">
-          <button class="btn btn-primary btn-sm" id="btn-modifica-top">Modifica scheda</button>
         </div>
         ${p.note ? `<div class="modal-section"><h3>Note generali</h3><p class="muted">${esc(p.note)}</p>${p.noteModificateIl ? `<p class="muted" style="font-size:11px; margin-top:4px;">Nota aggiornata il ${formatDataIt(p.noteModificateIl)}</p>` : ""}</div>` : ""}
         ${(() => {
@@ -5050,7 +4997,7 @@ function apriDettaglio(id) {
             ${p.altezza ? `<div class="media-item"><span class="media-label">Altezza</span><span class="media-valore">${esc(Math.round(p.altezza))} cm</span></div>` : ""}
             ${p.peso ? `<div class="media-item"><span class="media-label">Peso</span><span class="media-valore">${esc(Math.round(p.peso))} kg</span></div>` : ""}
             ${p.sviluppoBiologico ? `<div class="media-item"><span class="media-label">Sviluppo biologico</span><span class="media-valore">${esc(p.sviluppoBiologico)}</span></div>` : ""}
-            ${p.altezzaAdulto ? `<div class="media-item"><span class="media-label">Altezza da adulto</span><span class="media-valore">${esc(Math.round(p.altezzaAdulto * 10) / 10)} cm</span></div>` : ""}
+            ${p.altezzaAdulto ? `<div class="media-item"><span class="media-label">Altezza da adulto</span><span class="media-valore">${esc(p.altezzaAdulto)} cm</span></div>` : ""}
             ${p.dataMisurazione ? `<div class="media-item"><span class="media-label">Ultima misurazione</span><span class="media-valore mono">${formatDataIt(p.dataMisurazione)}</span></div>` : ""}
           </div>
         </div>` : ""}
@@ -5125,7 +5072,7 @@ function apriDettaglio(id) {
 
   document.getElementById("modal-close").onclick = chiudiModal;
   document.getElementById("modal-overlay").onclick = e => { if (e.target.id === "modal-overlay") chiudiModal(); };
-  const apriModificaScheda = () => {
+  document.getElementById("btn-modifica").onclick = () => {
     schedaProvenienza = {
       tab: currentTab,
       raduniSezione, radunoCorrenteId,
@@ -5135,8 +5082,6 @@ function apriDettaglio(id) {
     chiudiModal();
     switchTab("nuova", p);
   };
-  document.getElementById("btn-modifica").onclick = apriModificaScheda;
-  document.getElementById("btn-modifica-top").onclick = apriModificaScheda;
   document.getElementById("btn-stampa").onclick = () => window.print();
   document.getElementById("btn-riassunto-ai").onclick = async () => {
     const btn = document.getElementById("btn-riassunto-ai");
@@ -5441,13 +5386,7 @@ function renderForm(content, p) {
 
   content.innerHTML = `
     <form id="player-form" class="player-form">
-      <div class="form-actions-top">
-        <h2>${p ? "Modifica scheda giocatore" : "Nuova scheda giocatore"}</h2>
-        <div class="form-actions-top-buttons">
-          <button type="submit" class="btn btn-primary btn-sm">Salva scheda</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="btn-annulla-top">Annulla</button>
-        </div>
-      </div>
+      <h2>${p ? "Modifica scheda giocatore" : "Nuova scheda giocatore"}</h2>
 
       <div class="foto-upload">
         <div class="foto-preview-wrap">
@@ -5629,7 +5568,6 @@ function renderForm(content, p) {
   document.getElementById("btn-add-misurazione").onclick = () => misContainer.appendChild(creaRigaMisurazione());
   document.getElementById("btn-add-partita").onclick = () => partiteContainer.appendChild(creaRigaPartita());
   document.getElementById("btn-annulla").onclick = () => tornaAllaSchedaProvenienza();
-  document.getElementById("btn-annulla-top").onclick = () => tornaAllaSchedaProvenienza();
 
   let fotoCorrente = p && p.foto ? p.foto : "";
   document.getElementById("fp-foto-input").onchange = async e => {
@@ -7056,7 +6994,7 @@ async function elaboraFilePresenzePartite(file) {
   const iCognome = idx("cognome"), iNome = idx("nome"), iData = idx("data"),
     iCompetizione = idx("competizione"), iSquadra = idx("squadra"), iAvversario = idx("avversario"),
     iRisultato = idx("risultato"), iPresenza = idx("presenza"), iMinuti = idx("minuti"),
-    iGol = idx("gol"), iNote = idx("note"), iLink = idx("link");
+    iGol = idx("gol"), iNote = idx("note");
 
   const testo = v => (v === undefined || v === null) ? "" : v.toString().trim();
   const toISO = d => {
@@ -7101,10 +7039,6 @@ async function elaboraFilePresenzePartite(file) {
       minutiGiocati: iMinuti >= 0 ? numOrNull(r[iMinuti]) : null,
       gol: iGol >= 0 ? numOrNull(r[iGol]) : null,
       note: iNote >= 0 && testo(r[iNote]) ? testo(r[iNote]) : "Fonte: MatchCenter SFL",
-      // Colonna "Link" opzionale: URL del tabellino su MatchCenter, mostrato
-      // come link cliccabile nella scheda giocatore. Se il file non ha
-      // questa colonna (import più vecchi) semplicemente non c'è alcun link.
-      ...(iLink >= 0 && testo(r[iLink]) ? { link: testo(r[iLink]) } : {}),
     });
     aggiornati++;
   }
@@ -7175,19 +7109,12 @@ function trovaGiocatoreEsistente(cognome, nome, dataNascita) {
     const m = players.find(p => p.cognome.toLowerCase() === cognomeNorm && p.dataNascita === dataNascita);
     if (m) return m;
   }
-  // Priorità 2: cognome + nome esatti, utile quando la data manca. Se più di
-  // una scheda corrisponde (omonimi, nessuna con data di nascita registrata
-  // per distinguerli) NON possiamo scegliere con certezza: meglio non
-  // abbinare automaticamente — l'importazione tratterà il caso come "nuovo
-  // giocatore" (visibile e correggibile a mano, anche con lo strumento
-  // duplicati) piuttosto che agganciare in silenzio i dati alla scheda
-  // sbagliata tra due omonimi.
-  const candidati = players.filter(p =>
+  // Priorità 2: cognome + nome esatti, utile quando la data manca
+  return players.find(p =>
     p.cognome.toLowerCase() === cognomeNorm &&
     p.nome.toLowerCase() === nome.toLowerCase() &&
     (!dataNascita || !p.dataNascita || p.dataNascita === dataNascita)
   );
-  return candidati.length === 1 ? candidati[0] : null;
 }
 
 function valutazioneGiaPresente(lista, nuova) {
@@ -7535,6 +7462,16 @@ function trovaGruppiDuplicati() {
   return gruppi;
 }
 
+function dedupeArray(arr, chiaveFn) {
+  const viste = new Set();
+  return arr.filter(v => {
+    const k = chiaveFn(v);
+    if (viste.has(k)) return false;
+    viste.add(k);
+    return true;
+  });
+}
+
 function unisciGiocatori(idPrincipale, idsSecondari) {
   const principale = players.find(p => p.id === idPrincipale);
   if (!principale) return;
@@ -7542,8 +7479,6 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
   principale.valutazioni = principale.valutazioni || [];
   principale.etichette = principale.etichette || [];
   principale.trasferimenti = principale.trasferimenti || [];
-  principale.misurazioni = principale.misurazioni || [];
-  principale.partiteUfficiali = principale.partiteUfficiali || [];
 
   idsSecondari.forEach(id => {
     if (id === idPrincipale) return;
@@ -7553,11 +7488,6 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
     principale.valutazioni = principale.valutazioni.concat(secondario.valutazioni || []);
     (secondario.etichette || []).forEach(e => { if (!principale.etichette.includes(e)) principale.etichette.push(e); });
     principale.trasferimenti = principale.trasferimenti.concat(secondario.trasferimenti || []);
-    // Misurazioni fisiche (Mirwald) e partite ufficiali: mancavano dalla
-    // fusione, quindi se esistevano solo sulla scheda secondaria andavano
-    // perse silenziosamente quando la scheda veniva eliminata subito dopo.
-    principale.misurazioni = principale.misurazioni.concat(secondario.misurazioni || []);
-    principale.partiteUfficiali = principale.partiteUfficiali.concat(secondario.partiteUfficiali || []);
     if (!principale.foto && secondario.foto) principale.foto = secondario.foto;
     if (!principale.dataNascita && secondario.dataNascita) principale.dataNascita = secondario.dataNascita;
     if (!principale.squadra && secondario.squadra) principale.squadra = secondario.squadra;
@@ -7584,8 +7514,6 @@ function unisciGiocatori(idPrincipale, idsSecondari) {
     v => [v.data, v.parametro, v.valoreNumerico, v.scout, (v.notaScritta || "").trim()].join("§"));
   principale.visionature = dedupeArray(principale.visionature,
     v => [v.data, v.luogo, v.scout || "", (v.note || "").trim()].join("§"));
-  principale.misurazioni = dedupeArray(principale.misurazioni, m => m.data);
-  principale.partiteUfficiali = dedupeArray(principale.partiteUfficiali, m => [m.data, m.avversario || ""].join("§"));
 
   players = players.filter(p => p.id === idPrincipale || !idsSecondari.includes(p.id));
   savePlayers();
@@ -7709,21 +7637,7 @@ function renderPresenze(content) {
     <div class="presenze-lista">${settimaneHTML}</div>
   `;
 
-  document.getElementById("fp-testo").oninput = e => {
-    filtroPresenzeTesto = e.target.value;
-    // renderPresenze ricostruisce tutto il contenuto (content.innerHTML = ...),
-    // quindi il campo di ricerca viene distrutto e ricreato ad ogni lettera
-    // digitata: senza ridare il focus manualmente al nuovo campo, il cursore
-    // "esce" dalla ricerca dopo ogni carattere. Salviamo la posizione del
-    // cursore prima del re-render e la ripristiniamo sul nuovo elemento.
-    const posizioneCursore = e.target.selectionStart;
-    renderPresenze(content);
-    const nuovoCampo = document.getElementById("fp-testo");
-    if (nuovoCampo) {
-      nuovoCampo.focus();
-      nuovoCampo.setSelectionRange(posizioneCursore, posizioneCursore);
-    }
-  };
+  document.getElementById("fp-testo").oninput = e => { filtroPresenzeTesto = e.target.value; renderPresenze(content); };
   document.getElementById("fp-competizione").onchange = e => { filtroPresenzeCompetizione = e.target.value; renderPresenze(content); };
 
   content.querySelectorAll(".presenze-settimana").forEach(det => {
@@ -7753,6 +7667,8 @@ function renderStrumenti(content) {
         </div>
         <div id="mnt-backup-result"></div>
       </div>
+
+      ${renderGoogleCalendarStatusHTML()}
 
       <div class="import-subsection">
         <h3>Riassunto AI</h3>
@@ -7902,9 +7818,6 @@ function renderStrumenti(content) {
         if (!scelto) return;
         const idPrincipale = scelto.value;
         const idsSecondari = gruppo.map(p => p.id).filter(id => id !== idPrincipale);
-        const schedePrincipale = players.find(p => p.id === idPrincipale);
-        const nomiSecondari = gruppo.filter(p => idsSecondari.includes(p.id)).map(p => `${p.cognome} ${p.nome}`).join(", ");
-        if (!confirm(`Unire ${nomiSecondari} nella scheda di ${schedePrincipale ? schedePrincipale.cognome + " " + schedePrincipale.nome : "quella scelta"}? Le altre schede verranno eliminate definitivamente (visionature, valutazioni, misurazioni e partite verranno spostate su quella tenuta). Questa azione non si può annullare.`)) return;
         unisciGiocatori(idPrincipale, idsSecondari);
         renderGiocatoriDuplicati();
       };
@@ -7967,6 +7880,7 @@ function renderStrumenti(content) {
 
   const notaBackupEl = document.getElementById("nota-backup-automatico");
   if (notaBackupEl) renderNotaBackupAutomatico(notaBackupEl);
+  wireGoogleCalendarStatusHTML(content);
   document.getElementById("mnt-btn-backup-ora").onclick = async () => {
     const risultato = document.getElementById("mnt-backup-result");
     if (!dropboxConnesso) { risultato.innerHTML = `<div class="import-result import-result-warn">Connettiti prima a Dropbox (in fondo alla pagina).</div>`; return; }
@@ -8046,7 +7960,6 @@ function renderStrumenti(content) {
       btn.onclick = () => {
         const r = trovati[parseInt(btn.dataset.idx, 10)];
         const daEliminare = btn.dataset.keep === "2" ? r.data1 : r.data2;
-        if (!confirm(`Eliminare da ${r.nome} tutte le valutazioni e visionature del ${formatDataIt(daEliminare)}? Questa azione non si può annullare.`)) return;
         rimuoviVocePerData(r.playerId, daEliminare);
         renderQuasiDuplicati();
       };
@@ -8078,7 +7991,6 @@ function renderStrumenti(content) {
     const vecchio = document.getElementById("mnt-scout-source").value;
     const nuovo = document.getElementById("mnt-scout-target").value.trim();
     if (!vecchio || !nuovo) { alert("Scegli lo scout da sostituire e scrivi il nuovo nome."); return; }
-    if (!confirm(`Rinominare lo scout "${vecchio}" in "${nuovo}" su tutte le valutazioni? Dopo la rinomina, eventuali valutazioni diventate identiche (stessa data/parametro/valore/nota) verranno anche eliminate automaticamente come duplicati.`)) return;
     const conteggio = rinominaScout(vecchio, nuovo);
     const { rimosseValutazioni } = pulisciDuplicati();
     document.getElementById("mnt-scout-result").innerHTML =
@@ -8192,50 +8104,18 @@ async function cercaPartiteWeekend(content, da, a) {
 
   try {
     await Promise.all(Array.from({ length: CONCORRENZA }, lavoratore));
-    const risultati = arricchisciPartiteConGiocatori(tutteLePartite);
+    const risultati = tutteLePartite.map(partita => {
+      const infoCompetizione = COMPETIZIONI_MATCHCENTER.find(c => c.nome === partita.competizione);
+      const categoria = infoCompetizione ? infoCompetizione.categoria : (partita.categoria || null);
+      const giocatoriCasa = trovaGiocatoriPerSquadraECategoria(partita.casa, categoria);
+      const giocatoriOspite = trovaGiocatoriPerSquadraECategoria(partita.ospite, categoria);
+      return { ...partita, giocatoriCasa, giocatoriOspite };
+    });
     weekendRicerca = { inCorso: false, errore: null, diagnostica: tuttaLaDiagnostica.length ? tuttaLaDiagnostica : null, risultati, da, a };
   } catch (e) {
     console.error(e);
     weekendRicerca = { inCorso: false, errore: e.message, diagnostica: tuttaLaDiagnostica.length ? tuttaLaDiagnostica : null, risultati: null, da, a };
   }
-  renderCalendario(content);
-}
-
-// Stessa logica di cross-reference partita->giocatori usata da
-// cercaPartiteWeekend (chiamata dal Worker), estratta a parte così può
-// essere riusata anche da importaPartiteWeekendDaFile qui sotto: quando
-// non si hanno più crediti sul Worker Cloudflare (es. piano gratuito
-// ScrapeOps esaurito), le partite del weekend possono essere trovate a
-// mano/con una ricerca web e incollate in un file JSON con la stessa
-// forma restituita dal Worker ({ partite: [{data, ora, competizione,
-// casa, ospite}, ...] }) — la app fa comunque lei il riconoscimento dei
-// giocatori collegati, l'utente non deve calcolarlo a mano.
-function arricchisciPartiteConGiocatori(partite) {
-  return partite.map(partita => {
-    const infoCompetizione = COMPETIZIONI_MATCHCENTER.find(c => c.nome === partita.competizione);
-    const categoria = infoCompetizione ? infoCompetizione.categoria : (partita.categoria || null);
-    const giocatoriCasa = trovaGiocatoriPerSquadraECategoria(partita.casa, categoria);
-    const giocatoriOspite = trovaGiocatoriPerSquadraECategoria(partita.ospite, categoria);
-    return { ...partita, giocatoriCasa, giocatoriOspite };
-  });
-}
-
-// Percorso alternativo al Worker Cloudflare: importa un file JSON
-// preparato a mano (o da un'altra ricerca) con la lista di partite già
-// trovate, nella stessa forma { partite: [...] } che il Worker
-// restituirebbe per ogni competizione. Non fa nessuna chiamata di rete.
-function importaPartiteWeekendDaFile(content, dati) {
-  const partite = Array.isArray(dati) ? dati : (Array.isArray(dati.partite) ? dati.partite : null);
-  if (!partite) {
-    alert("File non riconosciuto: mi aspetto un JSON con { \"partite\": [ {data, ora, competizione, casa, ospite}, ... ] }.");
-    return;
-  }
-  const risultati = arricchisciPartiteConGiocatori(partite);
-  const date = partite.map(p => p.data).filter(Boolean).sort();
-  weekendRicerca = {
-    inCorso: false, errore: null, diagnostica: null, risultati,
-    da: date[0] || weekendRicerca.da, a: date[date.length - 1] || weekendRicerca.a
-  };
   renderCalendario(content);
 }
 
@@ -8245,14 +8125,7 @@ function renderRicercaWeekendHTML() {
   const da = w.da || weekendDefault.da;
   const a = w.a || weekendDefault.a;
 
-  const importaFileHTML = `
-    <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
-      Carica risultati da file JSON
-      <input type="file" accept=".json" id="input-importa-weekend-file" style="display:none;">
-    </label>`;
-  const importaFileSpiegazioneHTML = `<p class="muted" style="font-size:12px;">Alternativa al Worker (utile se hai finito i crediti del proxy): carica un file JSON con le partite già trovate, nella forma <span class="mono">{"partite":[{"data":"2026-08-08","ora":"18:00","competizione":"Super League","casa":"...","ospite":"..."}]}</span> — la app riconosce comunque da sola i giocatori collegati.</p>`;
-
-  if (!weekendWorkerUrl && !w.risultati) {
+  if (!weekendWorkerUrl) {
     return `
       <div class="import-subsection">
         <h3>Cerca partite del weekend</h3>
@@ -8262,9 +8135,7 @@ function renderRicercaWeekendHTML() {
         </label>
         <div class="import-actions">
           <button class="btn btn-primary" id="btn-salva-weekend-worker-url">Salva indirizzo</button>
-          ${importaFileHTML}
         </div>
-        ${importaFileSpiegazioneHTML}
       </div>`;
   }
 
@@ -8305,26 +8176,20 @@ function renderRicercaWeekendHTML() {
     } else {
       risultatiHTML = `
         <div class="cal-weekend-risultati">
-          ${conGiocatori.map((p, i) => {
-            const giaAggiunto = p.eventoAggiuntoId && eventi.some(e => e.id === p.eventoAggiuntoId);
-            const bottoneAggiungiHTML = giaAggiunto
-              ? `<button class="btn btn-ghost btn-sm" data-weekend-vai-a-evento="${esc(p.eventoAggiuntoId)}" style="opacity:0.8;">✓ Aggiunto — apri/modifica</button>`
-              : `<button class="btn btn-ghost btn-sm" data-weekend-aggiungi="${i}">+ Aggiungi a calendario</button>`;
-            return `
+          ${conGiocatori.map((p, i) => `
             <div class="candidato-card" style="margin-bottom:10px;">
               <div class="candidato-card-header">
                 <strong class="mono">${formatDataIt(p.data)}</strong> <span class="mono">${esc(p.ora)}</span> — ${esc(p.competizione)}
                 <span class="chip" style="margin-left:8px;">${esc(p.casa)} - ${esc(p.ospite)}</span>
                 <div class="import-actions">
-                  ${bottoneAggiungiHTML}
+                  <button class="btn btn-ghost btn-sm" data-weekend-aggiungi="${i}">+ Aggiungi a calendario</button>
                 </div>
               </div>
               <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:6px;">
                 ${colonnaSquadra(p.casa, p.giocatoriCasa)}
                 ${colonnaSquadra(p.ospite, p.giocatoriOspite)}
               </div>
-            </div>`;
-          }).join("")}
+            </div>`).join("")}
         </div>
         ${senzaGiocatori ? `<p class="muted">(+ altre ${senzaGiocatori} partite trovate in queste date senza giocatori tuoi, non mostrate)</p>` : ""}
       `;
@@ -8349,7 +8214,7 @@ function renderRicercaWeekendHTML() {
   return `
     <div class="import-subsection">
       <h3>Cerca partite del weekend</h3>
-      <p class="muted">Cerca sul matchcenter della Federazione le partite del weekend che coinvolgono squadre/categorie della tua banca dati. La lista è solo da consultare: nessun evento viene aggiunto al calendario finché non premi tu "+ Aggiungi a calendario" su una partita — un clic ed è già salvato, sotto in "Prossimi eventi".</p>
+      <p class="muted">Cerca sul matchcenter della Federazione le partite del weekend che coinvolgono squadre/categorie della tua banca dati. La lista è solo da consultare: nessun evento viene aggiunto al calendario finché non premi tu "+ Aggiungi a calendario" su una partita.</p>
       <div class="form-grid">
         <label>Da
           <input type="date" id="weekend-da" value="${esc(da)}">
@@ -8359,58 +8224,26 @@ function renderRicercaWeekendHTML() {
         </label>
       </div>
       <div class="import-actions">
-        ${weekendWorkerUrl ? `<button class="btn btn-primary" id="btn-cerca-weekend" ${w.inCorso ? "disabled" : ""}>${w.inCorso ? "Ricerca in corso…" : "Cerca partite"}</button>` : ""}
-        ${importaFileHTML}
-        ${weekendWorkerUrl ? `<button class="btn btn-ghost btn-sm" id="btn-cambia-weekend-worker-url">Cambia indirizzo Worker</button>` : `<button class="btn btn-ghost btn-sm" id="btn-imposta-weekend-worker-url">Imposta Worker Cloudflare</button>`}
-        ${w.risultati ? `<button class="btn btn-ghost btn-sm" id="btn-chiudi-weekend-risultati">Chiudi elenco partite</button>` : ""}
+        <button class="btn btn-primary" id="btn-cerca-weekend" ${w.inCorso ? "disabled" : ""}>${w.inCorso ? "Ricerca in corso…" : "Cerca partite"}</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cambia-weekend-worker-url">Cambia indirizzo Worker</button>
       </div>
-      ${!weekendWorkerUrl ? importaFileSpiegazioneHTML : ""}
       ${risultatiHTML}
       ${diagnosticaHTML}
     </div>`;
 }
 
-// Collega l'input file "Carica risultati da file JSON", presente in
-// entrambi gli stati (con o senza Worker configurato) di
-// renderRicercaWeekendHTML.
-function wireImportaWeekendFile(content) {
-  const input = document.getElementById("input-importa-weekend-file");
-  if (!input) return;
-  input.onchange = () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      let dati;
-      try { dati = JSON.parse(reader.result); }
-      catch (e) { alert("File JSON non valido: " + e.message); return; }
-      importaPartiteWeekendDaFile(content, dati);
-    };
-    reader.readAsText(file);
-  };
-}
-
 function wireRicercaWeekendHTML(content) {
-  wireImportaWeekendFile(content);
-  const salvaUrlWorker = async () => {
-    const url = document.getElementById("weekend-worker-url-input").value.trim();
-    if (!url) return;
-    weekendWorkerUrl = url;
-    await idbSet("weekend-worker-url", url);
-    renderCalendario(content);
-  };
-  const btnSalva = document.getElementById("btn-salva-weekend-worker-url");
-  if (btnSalva) btnSalva.onclick = salvaUrlWorker;
-  const btnImposta = document.getElementById("btn-imposta-weekend-worker-url");
-  if (btnImposta) btnImposta.onclick = () => {
-    // Nella vista risultati (import da file, senza Worker salvato) non
-    // c'è il campo url visibile: lo chiediamo al volo con un prompt.
-    const url = prompt("Indirizzo del Worker Cloudflare (https://tuoworker.tuonome.workers.dev):", "");
-    if (!url) return;
-    weekendWorkerUrl = url.trim();
-    idbSet("weekend-worker-url", weekendWorkerUrl).then(() => renderCalendario(content));
-  };
-  if (!weekendWorkerUrl && !weekendRicerca.risultati) return;
+  if (!weekendWorkerUrl) {
+    const btn = document.getElementById("btn-salva-weekend-worker-url");
+    if (btn) btn.onclick = async () => {
+      const url = document.getElementById("weekend-worker-url-input").value.trim();
+      if (!url) return;
+      weekendWorkerUrl = url;
+      await idbSet("weekend-worker-url", url);
+      renderCalendario(content);
+    };
+    return;
+  }
   const btnCerca = document.getElementById("btn-cerca-weekend");
   if (btnCerca) btnCerca.onclick = () => {
     const da = document.getElementById("weekend-da").value;
@@ -8427,44 +8260,21 @@ function wireRicercaWeekendHTML(content) {
     weekendRicerca = { inCorso: false, errore: null, diagnostica: null, risultati: null, da: null, a: null };
     renderCalendario(content);
   };
-  // Chiude/nasconde l'elenco delle partite trovate (da Worker o da file
-  // importato) senza toccare l'indirizzo del Worker salvato — serve solo a
-  // "svuotare la vista" e tornare a un Calendario pulito una volta che le
-  // partite che servivano sono già state aggiunte.
-  const btnChiudiRisultati = document.getElementById("btn-chiudi-weekend-risultati");
-  if (btnChiudiRisultati) btnChiudiRisultati.onclick = () => {
-    weekendRicerca = { inCorso: false, errore: null, diagnostica: null, risultati: null, da: null, a: null };
-    renderCalendario(content);
-  };
   if (weekendRicerca.risultati) {
     const conGiocatoriPerAggiungi = r => r.giocatoriCasa.confermati.length || r.giocatoriCasa.possibili.length
       || r.giocatoriOspite.confermati.length || r.giocatoriOspite.possibili.length;
-    // Un solo clic: crea subito l'evento (Partita/Scouting) e lo salva —
-    // non serve più passare dal form "Nuovo evento" qui sopra. Il pulsante
-    // della partita diventa poi "✓ Aggiunto — apri/modifica" (vedi
-    // renderRicercaWeekendHTML), che riapre quello stesso evento per
-    // ritoccarlo se serve.
     content.querySelectorAll("[data-weekend-aggiungi]").forEach(btn => {
       btn.onclick = () => {
         const p = weekendRicerca.risultati.filter(conGiocatoriPerAggiungi)[Number(btn.dataset.weekendAggiungi)];
         if (!p) return;
-        const eventoSalvato = {
-          id: uid(), data: p.data, dataFine: "", tipo: "Partita", categoria: "Scouting",
-          luogo: `${p.casa} - ${p.ospite}`, note: p.competizione, tuttoIlGiorno: false,
-          oraInizio: p.ora, oraFine: "", giocatoriIds: [], modificatoIl: new Date().toISOString(),
-          googleEventId: null, googleUpdated: null
-        };
-        eventi.push(eventoSalvato);
-        p.eventoAggiuntoId = eventoSalvato.id;
-        savePlayers();
+        calEventoInModifica = null;
         renderCalendario(content);
-        pushEventoAGoogleSeConnesso(eventoSalvato);
-      };
-    });
-    content.querySelectorAll("[data-weekend-vai-a-evento]").forEach(btn => {
-      btn.onclick = () => {
-        calEventoInModifica = btn.dataset.weekendVaiAEvento;
-        renderCalendario(content);
+        document.getElementById("cal-data").value = p.data;
+        document.getElementById("cal-tipo").value = "Partita";
+        document.getElementById("cal-luogo").value = `${p.casa} - ${p.ospite}`;
+        document.getElementById("cal-tutto-giorno").checked = false;
+        document.getElementById("cal-ora-inizio").value = p.ora;
+        document.getElementById("cal-note").value = p.competizione;
         window.scrollTo(0, 0);
       };
     });
@@ -8530,8 +8340,6 @@ function renderCalendario(content) {
       </div>
 
       ${renderRicercaWeekendHTML()}
-
-      ${renderGoogleCalendarStatusHTML()}
 
       <div class="import-subsection">
         <h3>Prossimi eventi</h3>
@@ -8640,7 +8448,6 @@ function renderCalendario(content) {
     };
   });
   wireRicercaWeekendHTML(content);
-  wireGoogleCalendarStatusHTML(content);
 }
 
 // Parole generiche che non identificano il club (prefissi societari, sigle
@@ -8893,120 +8700,6 @@ const REPARTI_GRID_PER_MODULO = {
   ]
 };
 
-// Alcune sigle del file Excel federale corrispondono, in certi moduli, a un
-// ruolo della griglia tattica con una chiave diversa: es. "MITTELFELD - OFF
-// (MFO)" è, quando il modulo prevede un trequartista, concettualmente lo
-// stesso ruolo dello slot "TRQ" (il file federale non usa mai la sigla TRQ).
-// Senza questo alias quei giocatori verrebbero lasciati come reparto
-// personalizzato invece di finire nello slot tattico corretto. Vale solo per
-// i moduli/chiavi elencati qui, non in generale.
-const CHIAVE_ALIAS_PER_MODULO = {
-  "1-4-3-1-2": { MFO: "TRQ" }
-};
-function chiaveEffettiva(chiaveGrezza, modulo) {
-  const alias = CHIAVE_ALIAS_PER_MODULO[modulo];
-  return (alias && alias[chiaveGrezza]) || chiaveGrezza;
-}
-
-// Mappa il "Ruolo primario" della scheda giocatore (campo libero, compilato
-// dagli scout) allo slot della griglia tattica di un raduno, per poter
-// piazzare in automatico un giocatore quando lo aggiungiamo in blocco (vedi
-// popolaRadunoDaEtichetta) invece di doverlo trascinare a mano uno per uno.
-// Prima riga: i 17 ruoli "canonici" concordati con Mattia — uno slot preciso
-// per modulo (null = quel modulo non ha uno slot equivalente, il giocatore
-// finisce comunque visibile come reparto personalizzato, mai perso).
-const RUOLO_SLOT_PER_MODULO = {
-  "Portiere":              { "1-4-3-3": "TH",     "1-4-3-1-2": "TH",     "1-3-4-2-1": "TH",     "1-4-4-2": "TH" },
-  "Esterno basso destro":  { "1-4-3-3": "AVE_dx",  "1-4-3-1-2": "AVE_dx",  "1-3-4-2-1": "AVE_dx",  "1-4-4-2": "AVE_dx" },
-  "Esterno basso sinistro":{ "1-4-3-3": "AVE_sx",  "1-4-3-1-2": "AVE_sx",  "1-3-4-2-1": "AVE_sx",  "1-4-4-2": "AVE_sx" },
-  "Quinto di destra":      { "1-4-3-3": "AVE_dx",  "1-4-3-1-2": "AVE_dx",  "1-3-4-2-1": "AVE_dx",  "1-4-4-2": "AVE_dx" },
-  "Quinto di sinistra":    { "1-4-3-3": "AVE_sx",  "1-4-3-1-2": "AVE_sx",  "1-3-4-2-1": "AVE_sx",  "1-4-4-2": "AVE_sx" },
-  "Difensore centrale destro":  { "1-4-3-3": "IVE_dx", "1-4-3-1-2": "IVE_dx", "1-3-4-2-1": "IVE_dx", "1-4-4-2": "IVE_dx" },
-  "Difensore centrale sinistro":{ "1-4-3-3": "IVE_sx", "1-4-3-1-2": "IVE_sx", "1-3-4-2-1": "IVE_sx", "1-4-4-2": "IVE_sx" },
-  "Braccetto destro":      { "1-4-3-3": "IVE_dx",  "1-4-3-1-2": "IVE_dx",  "1-3-4-2-1": "IVE_dx",  "1-4-4-2": "IVE_dx" },
-  "Braccetto sinistro":    { "1-4-3-3": "IVE_sx",  "1-4-3-1-2": "IVE_sx",  "1-3-4-2-1": "IVE_sx",  "1-4-4-2": "IVE_sx" },
-  "Mezzala destra":        { "1-4-3-3": "MEZ_dx",  "1-4-3-1-2": "MFD_dx",  "1-3-4-2-1": "MFZ_dx",  "1-4-4-2": "MFZ_dx" },
-  "Mezzala sinistra":      { "1-4-3-3": "MEZ_sx",  "1-4-3-1-2": "MFD_sx",  "1-3-4-2-1": "MFZ_sx",  "1-4-4-2": "MFZ_sx" },
-  "Regista":               { "1-4-3-3": "MED",     "1-4-3-1-2": "MFZ",     "1-3-4-2-1": "MFZ_dx",  "1-4-4-2": "MFZ_dx" },
-  "Trequartista":          { "1-4-3-3": null,      "1-4-3-1-2": "TRQ",     "1-3-4-2-1": null,      "1-4-4-2": null },
-  "Ala destra":            { "1-4-3-3": "ALA_dx",  "1-4-3-1-2": null,      "1-3-4-2-1": null,      "1-4-4-2": "STA_dx" },
-  "Ala sinistra":          { "1-4-3-3": "ALA_sx",  "1-4-3-1-2": null,      "1-3-4-2-1": null,      "1-4-4-2": "STA_sx" },
-  "Prima punta":           { "1-4-3-3": "CEN",     "1-4-3-1-2": "STZ_dx",  "1-3-4-2-1": "STZ",     "1-4-4-2": "STZ_punta" },
-  "Seconda punta":         { "1-4-3-3": "CEN",     "1-4-3-1-2": "STZ_sx",  "1-3-4-2-1": "SEC_dx",  "1-4-4-2": "STZ_10" }
-};
-// Sinonimi/varianti storiche già presenti in banca dati (compilate prima che
-// si standardizzasse sui 17 ruoli sopra, es. "Difesa al centro", "Centrocampo",
-// terminologia in francese/tedesco): riconosciute per parola chiave, non per
-// corrispondenza esatta, così l'auto-piazzamento funziona anche sulle schede
-// più vecchie. Il riconoscimento avviene in due passi indipendenti dalla
-// posizione delle parole nel testo (es. "Esterno sinistro di difesa" ha il
-// lato PRIMA della parola che identifica la famiglia di ruolo, mentre
-// "Difensore centrale sinistro" ce l'ha DOPO): prima la "famiglia" di ruolo
-// (categoria), poi il lato destro/sinistro, cercati ovunque nel testo.
-function latoDaTesto(t) {
-  if (/sinistr|\bsx\b|gauche|links/i.test(t)) return "sx";
-  if (/destr|\bdx\b|droit|rechts/i.test(t)) return "dx";
-  return null;
-}
-// Ordine di controllo importante: le categorie più specifiche (Ala,
-// Braccetto, Quinto...) vanno prima di quelle generiche (EsternoBasso,
-// DifensoreCentrale, Mezzala) che altrimenti le intercetterebbero per prime
-// (es. "esterno offensivo" deve finire su Ala, non su EsternoBasso).
-const RUOLO_CATEGORIA_KEYWORDS = [
-  { cat: "Portiere", test: /portier|torh[üu]ter|goalkeeper|torwart/i },
-  { cat: "Trequartista", test: /trequartista|h[äa]ngende spitze|regista offensiv/i },
-  { cat: "Regista", test: /\bregista\b|\bplaymaker\b|\bmediano\b|demi.*d[ée]fensif|centrocampist.*central|central.*centrocampist|mittelfeld.*defensiv|defensiv.*mittelfeld/i },
-  { cat: "Ala", test: /\bala\b|esterno (alto|offensiv)|fl[üu]gel|\bwinger\b|mittelfeld.*aussen/i },
-  { cat: "Braccetto", test: /braccetto/i },
-  { cat: "Quinto", test: /\bquinto\b/i },
-  { cat: "EsternoBasso", test: /esterno.*(basso|laterale|di difesa)|\bterzino\b|difesa latera|d[ée]fense lat[ée]ral|\besterno\b|verteidigung.*aussen/i },
-  { cat: "Mezzala", test: /mezzala|interno.*centrocampo|\bcentrocampo\b|centrocampista(?!.*central)|\binterno\b|\bmittelfeld\b|int[ée]rieur/i },
-  { cat: "DifensoreCentrale", test: /difens|difesa|verteidigung/i },
-  { cat: "SecondaPunta", test: /second[ao] punta|punta di (so|sto)stegno/i },
-  { cat: "PrimaPunta", test: /prima punta|centravanti|attacco central|attaccante|st[üu]rmer|sturmspitze/i }
-];
-// Categoria + lato -> ruolo canonico (uno dei 17). Le categorie senza lato
-// (Portiere/Trequartista/Regista/Prima punta/Seconda punta) ignorano il lato.
-function categoriaLatoARuolo(cat, lato) {
-  const dx = lato !== "sx"; // default destro quando il lato non è specificato nel testo
-  switch (cat) {
-    case "Portiere": return "Portiere";
-    case "Trequartista": return "Trequartista";
-    case "Regista": return "Regista";
-    case "Ala": return dx ? "Ala destra" : "Ala sinistra";
-    case "Braccetto": return dx ? "Braccetto destro" : "Braccetto sinistro";
-    case "Quinto": return dx ? "Quinto di destra" : "Quinto di sinistra";
-    case "EsternoBasso": return dx ? "Esterno basso destro" : "Esterno basso sinistro";
-    case "Mezzala": return dx ? "Mezzala destra" : "Mezzala sinistra";
-    case "DifensoreCentrale": return dx ? "Difensore centrale destro" : "Difensore centrale sinistro";
-    case "SecondaPunta": return "Seconda punta";
-    case "PrimaPunta": return "Prima punta";
-    default: return null;
-  }
-}
-// Riconosce il ruolo canonico da un testo libero di ruoloPrimario: prima
-// prova la corrispondenza esatta con uno dei 17 ruoli standard, poi
-// categoria+lato per parola chiave. Torna null se proprio non si riconosce
-// nulla (il chiamante userà comunque il testo grezzo come reparto
-// personalizzato, così il giocatore resta visibile, mai perso).
-function ruoloCanonico(ruoloPrimario) {
-  if (!ruoloPrimario) return null;
-  const t = ruoloPrimario.trim();
-  if (RUOLO_SLOT_PER_MODULO.hasOwnProperty(t)) return t;
-  const categoria = RUOLO_CATEGORIA_KEYWORDS.find(c => c.test.test(t));
-  if (!categoria) return null;
-  return categoriaLatoARuolo(categoria.cat, latoDaTesto(t));
-}
-// Slot di destinazione nella griglia tattica del modulo dato, per il ruolo
-// primario di un giocatore. Torna null se il ruolo non si riconosce o se il
-// modulo non ha uno slot equivalente per quel ruolo.
-function slotIdDaRuoloPrimario(ruoloPrimario, modulo) {
-  const canonico = ruoloCanonico(ruoloPrimario);
-  if (!canonico) return null;
-  const mappa = RUOLO_SLOT_PER_MODULO[canonico];
-  return (mappa && mappa[modulo]) || null;
-}
-
 // Righe della griglia tattica per il modulo del raduno (senza i reparti
 // personalizzati, che vengono mostrati a parte in una riga finale).
 function grigliaRaduno(raduno) {
@@ -9208,22 +8901,7 @@ function renderRaduniLista(content) {
   const gruppo = radunoGruppoAttivo();
   const raduniOrdinati = raduni
     .filter(r => (r.gruppo || "u16") === gruppo)
-    .slice().sort((a, b) => {
-      // Le "rose" persistenti (senza date, es. "Rosa Nazionale U16 TYT")
-      // vanno sempre in cima, prima di qualsiasi raduno con date: sono un
-      // riferimento che si consulta spesso, non ha senso che si perdano in
-      // mezzo alla lista cronologica.
-      const aRosa = a.tipo === "rosa", bRosa = b.tipo === "rosa";
-      if (aRosa !== bRosa) return aRosa ? -1 : 1;
-      if (aRosa && bRosa) return (a.nome || "").localeCompare(b.nome || "");
-      // Ordine cronologico: dal raduno più vecchio al più recente. Chi non
-      // ha ancora una data di inizio (raduno appena creato, non compilato)
-      // va in fondo, così non si mescola tra le date note.
-      if (!a.dataInizio && !b.dataInizio) return 0;
-      if (!a.dataInizio) return 1;
-      if (!b.dataInizio) return -1;
-      return a.dataInizio.localeCompare(b.dataInizio);
-    });
+    .slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
   const titolo = gruppo === "fcl" ? "Raduni FCL" : "Raduni U16";
   const descrizione = gruppo === "fcl"
     ? "Gestisci i raduni del Partenariato U15 Ticino (FC Lugano U15 e FC Giubiasco U15): crea la rosa a mano scegliendo giocatori dall'Elenco, oppure importa la rosa direttamente da un file Excel Kaderliste."
@@ -9285,9 +8963,8 @@ function renderRaduniLista(content) {
 function radunoCardHTML(r) {
   const nGiocatori = (r.rosa || []).length;
   return `
-    <div class="candidato-card${r.tipo === "rosa" ? " raduno-card-rosa" : ""}">
+    <div class="candidato-card">
       <div class="candidato-card-header">
-        ${r.tipo === "rosa" ? `<span class="chip chip-active" style="margin-right:4px;" title="Elenco persistente senza date">ROSA</span>` : ""}
         <strong>${esc(r.nome || "Raduno senza nome")}</strong>
         ${r.modulo ? `<span class="chip" style="margin-left:8px;">${esc(r.modulo)}</span>` : ""}
         <span class="chip" style="margin-left:8px;">${nGiocatori} giocator${nGiocatori === 1 ? "e" : "i"}</span>
@@ -9309,12 +8986,6 @@ function radunoCardHTML(r) {
 
 function renderRadunoForm(content) {
   const r = radunoCorrenteId ? raduni.find(x => x.id === radunoCorrenteId) : null;
-  // Se il raduno che si stava per modificare appartiene all'altro gruppo
-  // (U16/FCL) rispetto al tab attivo, non è valido qui: torniamo alla lista
-  // invece di rischiare di salvare modifiche sul raduno sbagliato (vedi il
-  // reset in switchTab per il caso normale; questo controllo è una seconda
-  // rete di sicurezza).
-  if (r && (r.gruppo || "u16") !== radunoGruppoAttivo()) { radunoCorrenteId = null; raduniSezione = "lista"; render(); return; }
   const eventiRaduno = eventi.filter(e => e.tipo === "Raduno").sort((a, b) => (b.data || "").localeCompare(a.data || ""));
   content.innerHTML = `
     <div class="import-box">
@@ -9322,10 +8993,6 @@ function renderRadunoForm(content) {
       <div class="form-grid">
         <label>Nome raduno
           <input type="text" id="rad-nome" value="${esc(r ? r.nome : radunoNomeDaCreare || "")}">
-        </label>
-        <label style="display:flex; align-items:center; gap:8px; flex-direction:row;" title="Una rosa è un elenco persistente senza date (es. 'Rosa Nazionale U16 TYT 2011'): serve a tenere sott'occhio tutti i giocatori interessanti in un gruppo, da cui poi puoi copiare la lista in un raduno vero con le sue date. Compare in cima alla lista con un'etichetta ROSA.">
-          <input type="checkbox" id="rad-tipo-rosa" style="width:auto;" ${r && r.tipo === "rosa" ? "checked" : ""}>
-          <span>È una rosa persistente (senza date, sempre in cima alla lista)</span>
         </label>
         <label>Luogo
           <input type="text" id="rad-luogo" value="${esc(r ? r.luogo : "")}">
@@ -9404,8 +9071,7 @@ function renderRadunoForm(content) {
       analyst: document.getElementById("rad-analyst").value.trim(),
       tom: document.getElementById("rad-tom").value.trim(),
       note: document.getElementById("rad-note").value.trim(),
-      eventoCalendarioId: document.getElementById("rad-evento-calendario").value || null,
-      tipo: document.getElementById("rad-tipo-rosa").checked ? "rosa" : null
+      eventoCalendarioId: document.getElementById("rad-evento-calendario").value || null
     };
     if (r) {
       Object.assign(r, dati);
@@ -9451,110 +9117,6 @@ function aggiungiGiocatoreARaduno(r, giocatoreId, reparto) {
 // Giocatore attualmente trascinato (drag & drop tra/dentro i reparti).
 let radunoDragGiocatoreId = null;
 
-// Aggiunge in blocco tutti i giocatori che hanno UNA delle etichette date
-// (usato dalle "rose" persistenti, es. "Rosa Nazionale U16 TYT (2011)", per
-// popolarsi da un'etichetta invece di cercare i giocatori uno per uno). Ogni
-// giocatore viene piazzato nello slot della griglia tattica dedotto dal suo
-// Ruolo primario (vedi slotIdDaRuoloPrimario); se il ruolo non si riconosce,
-// o il modulo non ha uno slot equivalente, il giocatore NON viene perso: va
-// in un reparto personalizzato con il suo ruolo grezzo come etichetta, così
-// resta visibile e lo si sistema a mano. I giocatori già presenti in rosa
-// non vengono toccati (aggiunta additiva, non sovrascrive assegnazioni
-// manuali già fatte — per ripartire puliti c'è già "Svuota rosa").
-function popolaRadunoDaEtichetta(r, etichette) {
-  r.rosa = r.rosa || [];
-  r.repartiPersonalizzati = r.repartiPersonalizzati || [];
-  const giaPresenti = new Set(r.rosa.map(x => x.giocatoreId));
-  const fissi = new Set(slotFissiRaduno(r).map(s => s.id));
-  const candidati = players.filter(p => (p.etichette || []).some(e => etichette.includes(e)));
-  let aggiunti = 0, senzaRuoloRiconosciuto = 0;
-  candidati.forEach(p => {
-    if (giaPresenti.has(p.id)) return;
-    let slotId = slotIdDaRuoloPrimario(p.ruoloPrimario, r.modulo);
-    if (!slotId || !fissi.has(slotId)) {
-      const nomeReparto = (p.ruoloPrimario || "").trim() || "Senza ruolo";
-      if (!r.repartiPersonalizzati.includes(nomeReparto)) r.repartiPersonalizzati.push(nomeReparto);
-      slotId = nomeReparto;
-      senzaRuoloRiconosciuto++;
-    }
-    r.rosa.push({ giocatoreId: p.id, reparto: slotId });
-    giaPresenti.add(p.id);
-    aggiunti++;
-  });
-  savePlayers();
-  return { aggiunti, senzaRuoloRiconosciuto, totaleCandidati: candidati.length };
-}
-
-// Duplica un raduno (tipicamente una "rosa" persistente) in un raduno nuovo
-// con le sue date da compilare: copia i giocatori e la loro posizione nella
-// griglia, ma NON lo stato (Kaderspieler/Pikett/ecc.) né i reparti
-// personalizzati non ancora risolti in uno slot fisso, perché lo stato è
-// specifico della singola convocazione, non della rosa di partenza — su un
-// nuovo raduno riparte sempre da "nessuno stato assegnato".
-function duplicaRaduno(rOrigine, nuovoNome) {
-  const nuovo = {
-    id: uid(), nome: nuovoNome, luogo: "", dataInizio: "", dataFine: "",
-    stagione: rOrigine.stagione || "", annata: rOrigine.annata || "", modulo: rOrigine.modulo || MODULI_RADUNO[0],
-    trainer: rOrigine.trainer || "", assistente1: rOrigine.assistente1 || "", assistente2: rOrigine.assistente2 || "",
-    thTrainer: rOrigine.thTrainer || "", athletik: rOrigine.athletik || "", analyst: rOrigine.analyst || "", tom: rOrigine.tom || "",
-    eventoCalendarioId: null, note: "", tipo: null, gruppo: rOrigine.gruppo || "u16",
-    rosa: (rOrigine.rosa || []).map(v => ({ giocatoreId: v.giocatoreId, reparto: v.reparto })),
-    repartiPersonalizzati: (rOrigine.repartiPersonalizzati || []).slice()
-  };
-  raduni.push(nuovo);
-  savePlayers();
-  return nuovo;
-}
-
-// Esporta il raduno nel formato "Call Up" usato per mandare le convocazioni
-// ufficiali al team manager (stessa struttura del modello federale: blocco
-// intestazione, poi "Selected Players" e "On Call Players", entrambe in
-// ordine alfabetico per cognome). Selected = giocatori con stato
-// "kaderspieler", On Call = stato "pikett"; chi non ha nessuno stato
-// assegnato non compare in nessuna delle due liste (non è ancora deciso).
-function esportaCallUp(r) {
-  const perNome = (a, b) => {
-    const pa = players.find(pl => pl.id === a.giocatoreId), pb = players.find(pl => pl.id === b.giocatoreId);
-    if (!pa || !pb) return 0;
-    return pa.cognome.localeCompare(pb.cognome) || pa.nome.localeCompare(pb.nome);
-  };
-  const selezionati = (r.rosa || []).filter(v => v.stato === "kaderspieler").slice().sort(perNome);
-  const picchetto = (r.rosa || []).filter(v => v.stato === "pikett").slice().sort(perNome);
-
-  const rigaGiocatore = (v, i) => {
-    const p = players.find(pl => pl.id === v.giocatoreId);
-    if (!p) return [i + 1, "", "", ""];
-    return [i + 1, `${p.cognome || ""} ${p.nome || ""}`.trim(), p.dataNascita ? formatDataIt(p.dataNascita) : "", p.squadra || ""];
-  };
-
-  const aoa = [];
-  aoa.push(["", "", "CALL UP"]);
-  aoa.push(["", "Team:", ""]);
-  aoa.push(["", "Coach:", r.trainer || ""]);
-  aoa.push(["", "Event:", r.nome || ""]);
-  aoa.push(["", "Sending date of the call up:", formatDataIt(dataOggiLocale())]);
-  aoa.push(["", "Time / Location MEET:", [r.dataInizio ? formatDataIt(r.dataInizio) : "", r.luogo || ""].filter(Boolean).join(" - ")]);
-  aoa.push(["", "Time / Location END:", [r.dataFine ? formatDataIt(r.dataFine) : "", r.luogo || ""].filter(Boolean).join(" - ")]);
-  aoa.push(["", "Nr. Players selected", selezionati.length]);
-  aoa.push(["", "Nr. Players on call", picchetto.length]);
-  aoa.push([" ", "Selected Players"]);
-  aoa.push(["#", "Name", "DOB", "CLUB"]);
-  selezionati.forEach((v, i) => aoa.push(rigaGiocatore(v, i)));
-  aoa.push([]);
-  aoa.push([" ", "On Call Players"]);
-  aoa.push(["#", "Name", "DOB", "CLUB"]);
-  picchetto.forEach((v, i) => aoa.push(rigaGiocatore(v, i)));
-
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 5 }, { wch: 28 }, { wch: 26 }, { wch: 22 }];
-  const wbOut = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wbOut, ws, "Call Up");
-  const slug = (r.nome || "raduno").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-  XLSX.writeFile(wbOut, `call-up-${slug || "raduno"}.xlsx`);
-
-  return { selezionati: selezionati.length, picchetto: picchetto.length };
-}
-
 // Elenco dei giocatori da proporre nel campo "+ Aggiungi giocatore" di un
 // raduno: se il raduno ha un'annata impostata (anno di nascita, es. "2011")
 // mostriamo solo i giocatori nati in quell'anno invece di tutto l'Elenco —
@@ -9577,19 +9139,9 @@ function giocatoriSuggeritiRaduno(r) {
   );
 }
 
-// Tutte le etichette distinte usate in banca dati, in ordine alfabetico —
-// usata dal selettore "Popola in blocco da un'etichetta" delle rose.
-function etichetteTutteUsate() {
-  return [...new Set(players.flatMap(p => p.etichette || []))].sort();
-}
-
 function renderRadunoDettaglio(content) {
   const r = raduni.find(x => x.id === radunoCorrenteId);
-  // Il raduno aperto deve appartenere al gruppo (U16/FCL) del tab attivo:
-  // altrimenti staremmo per mostrare/modificare la rosa del raduno
-  // dell'ALTRO gruppo (vedi il reset in switchTab per il caso normale;
-  // questo controllo è una seconda rete di sicurezza).
-  if (!r || (r.gruppo || "u16") !== radunoGruppoAttivo()) { raduniSezione = "lista"; radunoCorrenteId = null; render(); return; }
+  if (!r) { raduniSezione = "lista"; render(); return; }
   const griglia = grigliaRaduno(r);
 
   // Conteggio giocatori per stato (Kaderspieler, Pikett-Spieler, ecc.), per
@@ -9614,8 +9166,6 @@ function renderRadunoDettaglio(content) {
           <button class="btn btn-ghost btn-sm" id="btn-allenamenti-raduno">Allenamenti${(r.allenamenti || []).length ? ` (${(r.allenamenti || []).length})` : ""}</button>
           <button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-dett">Esporta Lista</button>
           ${r.modulo === "1-4-4-2" ? `<button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-ufficiale">Esporta Kaderliste ufficiale</button>` : ""}
-          <button class="btn btn-ghost btn-sm" id="btn-esporta-call-up" title="Esporta nel formato usato per le convocazioni ufficiali (Selected Players / On Call Players)">Esporta Call Up</button>
-          <button class="btn btn-ghost btn-sm" id="btn-duplica-raduno" title="Crea un nuovo raduno con le date da compilare, partendo dagli stessi giocatori di questa rosa">Duplica in nuovo raduno</button>
           <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
             Importa/aggiungi da Excel
             <input type="file" accept=".xlsx,.xls" id="input-importa-raduno-dett" style="display:none;">
@@ -9688,16 +9238,6 @@ function renderRadunoDettaglio(content) {
       </div>
 
       <div class="import-subsection">
-        <label>Popola in blocco da un'etichetta <span class="muted" style="font-weight:normal;">(aggiunge tutti i giocatori con quell'etichetta, piazzandoli in automatico dal Ruolo primario — chi già c'è non viene toccato)</span>
-          <select id="rad-popola-etichetta">
-            <option value="">— Scegli etichetta —</option>
-            ${etichetteTutteUsate().map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join("")}
-          </select>
-        </label>
-        <button class="btn btn-ghost btn-sm" id="btn-popola-etichetta" style="margin-top:6px;">Popola rosa</button>
-      </div>
-
-      <div class="import-subsection">
         <label>+ Aggiungi reparto personalizzato
           <input type="text" id="rad-nuovo-reparto" placeholder="es. Riserve">
         </label>
@@ -9725,38 +9265,6 @@ function renderRadunoDettaglio(content) {
       r.rosa = [];
       r.repartiPersonalizzati = [];
       savePlayers();
-      render();
-    };
-  }
-
-  document.getElementById("btn-esporta-call-up").onclick = () => {
-    const esito = esportaCallUp(r);
-    if (!esito.selezionati && !esito.picchetto) {
-      alert(`Nessun giocatore ha ancora uno stato "Kaderspieler" o "Pikett-Spieler" in questa rosa: il file esportato avrà le due liste vuote. Assegna gli stati cliccando il quadratino colorato sui giocatori, poi riesporta.`);
-    }
-  };
-
-  document.getElementById("btn-duplica-raduno").onclick = () => {
-    const nuovoNome = prompt(`Nome del nuovo raduno (partirà con gli stessi ${(r.rosa || []).length} giocatori di "${r.nome}", da confermare/togliere, e le date da compilare):`, "");
-    if (!nuovoNome || !nuovoNome.trim()) return;
-    const nuovo = duplicaRaduno(r, nuovoNome.trim());
-    radunoCorrenteId = nuovo.id;
-    raduniSezione = "form";
-    render();
-  };
-
-  if (document.getElementById("btn-popola-etichetta")) {
-    document.getElementById("btn-popola-etichetta").onclick = () => {
-      const etichetta = document.getElementById("rad-popola-etichetta").value;
-      if (!etichetta) { alert("Scegli prima un'etichetta dal menu."); return; }
-      const esito = popolaRadunoDaEtichetta(r, [etichetta]);
-      if (!esito.totaleCandidati) {
-        alert(`Nessun giocatore in banca dati ha l'etichetta "${etichetta}".`);
-        return;
-      }
-      let msg = `Aggiunti ${esito.aggiunti} giocatori da "${etichetta}" (${esito.totaleCandidati - esito.aggiunti} già presenti in rosa, non toccati).`;
-      if (esito.senzaRuoloRiconosciuto) msg += `\n\n${esito.senzaRuoloRiconosciuto} non avevano un Ruolo primario riconosciuto (o compatibile con il modulo ${r.modulo}): sono finiti in reparti personalizzati con il loro ruolo grezzo come etichetta — spostali a mano nella griglia.`;
-      alert(msg);
       render();
     };
   }
@@ -10125,7 +9633,7 @@ function estraiMetaGiocatore(row, colonnaNome) {
 function parseFoglioKaderliste(aoa, ws) {
   const scheda = {
     nome: "", luogo: "", stagione: "", trainer: "", assistente1: "", assistente2: "",
-    thTrainer: "", athletik: "", analyst: "", tom: "", modulo: null, moduloCandidati: [], annata: null,
+    thTrainer: "", athletik: "", analyst: "", tom: "", modulo: null, annata: null,
     reparti: []
   };
   // Nel file reale ci sono più reparti affiancati sulla stessa riga di
@@ -10177,42 +9685,10 @@ function parseFoglioKaderliste(aoa, ws) {
       if (RADUNO_LABEL_REGEX.spielsysteme.test(testo)) {
         // Nel file reale il valore di "Spielsysteme:" a volte non è sulla
         // stessa riga dell'etichetta ma nella riga subito sotto, stessa
-        // colonna. Alcuni file (es. quelli della Nazionale) elencano invece
-        // più sistemi possibili, uno per riga ("1) 1-4-3-1-2", "2) ...",
-        // "3) ..."), senza indicare quale sia quello davvero in uso: in quel
-        // caso raccogliamo TUTTI i moduli riconosciuti nelle righe sotto
-        // l'etichetta (candidati) invece di prendere per buono solo il primo
-        // valore trovato, che altrimenti sarebbe la sola scritta "1)" e
-        // farebbe fallire silenziosamente il riconoscimento. La scelta tra i
-        // candidati viene poi lasciata all'utente nella schermata di verifica
-        // (vedi radunoSchedaImportHTML).
-        const candidati = [];
-        const valStessaRiga = primoValoreNonVuoto(row, ci + 1, 6);
-        const mStessaRiga = rilevaModuloDaTesto(valStessaRiga);
-        if (mStessaRiga) candidati.push(mStessaRiga);
-        for (let rr = ri + 1; rr <= ri + 4 && rr < aoa.length; rr++) {
-          const rowSotto = aoa[rr] || [];
-          // Proviamo sia "stessa colonna dell'etichetta" (caso di un solo
-          // valore sotto, senza numerazione) sia "una colonna a destra"
-          // (caso "1) 1-4-3-1-2" con l'etichetta numerata nella colonna
-          // dell'etichetta e il modulo in quella accanto).
-          [primoValoreNonVuoto(rowSotto, ci, 3), primoValoreNonVuoto(rowSotto, ci + 1, 5)].forEach(v => {
-            const m = rilevaModuloDaTesto(v);
-            if (m && !candidati.includes(m)) candidati.push(m);
-          });
-        }
-        if (!candidati.length) {
-          const mTesto = rilevaModuloDaTesto(testo);
-          if (mTesto) candidati.push(mTesto);
-        }
-        scheda.moduloCandidati = candidati;
-        // Con un solo candidato riconosciuto lo usiamo direttamente come
-        // prima; con più candidati ne pre-selezioniamo il primo solo come
-        // punto di partenza comodo in revisione, ma scheda.moduloCandidati
-        // resta popolato per mostrare l'avviso "verifica" all'utente, perché
-        // qui non possiamo sapere con certezza quale dei sistemi elencati sia
-        // quello realmente usato per questa rosa.
-        scheda.modulo = candidati.length ? candidati[0] : null;
+        // colonna — proviamo entrambe le posizioni.
+        let val = primoValoreNonVuoto(row, ci + 1, 6);
+        if (!val && aoa[ri + 1]) val = primoValoreNonVuoto(aoa[ri + 1], ci, 3);
+        scheda.modulo = rilevaModuloDaTesto(val) || rilevaModuloDaTesto(testo);
         continue;
       }
       if (/^torh[üu]ter/i.test(testo)) {
@@ -10290,43 +9766,19 @@ function indizioSlotDaTesto(nomeOriginale, slotsChiave) {
 // stessa sigla ("FLÜGELSPIELER (STA)" per la fascia DX, "MITTELFELD AUSSEN
 // (MFA)" per quella SX) — per questo lo slot Flügel SX ha chiave "MFA" e non
 // "STA" nella griglia sopra, invece di affidarsi al round-robin.
-// NOTA blocco unico su più slot: a volte è vero il contrario — un'UNICA
-// colonna Excel (es. "MITTELFELD - PLAY (MFD)", un solo blocco da 8
-// giocatori) deve riempire PIÙ slot dello stesso ruolo nella griglia
-// (Mediano DX + Mediano SX), perché il file non distingue dx/sx per quel
-// reparto. Assegnando l'intero blocco a un solo slot, come fa il
-// round-robin per-reparto sopra, l'altro slot resterebbe visibilmente vuoto
-// e sembrerebbe che l'app non abbia riconosciuto quei giocatori (bug
-// segnalato dall'utente). In questo caso distribuiamo invece i singoli
-// giocatori a rotazione sui vari slot (rep.slotIdsPerGiocatore), invece del
-// blocco intero su un unico slot.
 function assegnaSlotDefaultImport(scheda) {
   const griglia = REPARTI_GRID_PER_MODULO[scheda.modulo] || REPARTI_GRID_PER_MODULO[MODULI_RADUNO[0]];
   const slotsPiatti = griglia.flat();
   const usoContatore = {};
-  const chiaviEffettive = scheda.reparti.map(rep => chiaveEffettiva(rep.chiave, scheda.modulo));
-  const repartiPerChiave = {};
-  chiaviEffettive.forEach(c => { repartiPerChiave[c] = (repartiPerChiave[c] || 0) + 1; });
-
-  scheda.reparti.forEach((rep, idx) => {
-    const chiave = chiaviEffettive[idx];
-    const slotsChiave = slotsPiatti.filter(s => s.chiave === chiave);
-    rep.slotIdsPerGiocatore = null;
-    if (!slotsChiave.length) {
-      rep.slotIdDefault = rep.chiave;
-      return;
-    }
-    let slotId = indizioSlotDaTesto(rep.nomeOriginale, slotsChiave);
-    if (!slotId && slotsChiave.length > 1 && repartiPerChiave[chiave] === 1 && rep.giocatori.length > 1) {
-      rep.slotIdsPerGiocatore = rep.giocatori.map((g, i) => slotsChiave[i % slotsChiave.length].id);
-      slotId = rep.slotIdsPerGiocatore[0];
-    }
-    if (!slotId) {
-      const i = usoContatore[chiave] || 0;
+  scheda.reparti.forEach(rep => {
+    const slotsChiave = slotsPiatti.filter(s => s.chiave === rep.chiave);
+    let slotId = slotsChiave.length ? indizioSlotDaTesto(rep.nomeOriginale, slotsChiave) : null;
+    if (!slotId && slotsChiave.length) {
+      const i = usoContatore[rep.chiave] || 0;
       slotId = slotsChiave[i % slotsChiave.length].id;
-      usoContatore[chiave] = i + 1;
+      usoContatore[rep.chiave] = i + 1;
     }
-    rep.slotIdDefault = slotId;
+    rep.slotIdDefault = slotId || rep.chiave;
   });
 }
 
@@ -10404,10 +9856,9 @@ function avviaVerificaImportRaduno(wb, nomiFogli, targetId, fileName) {
   schede.forEach(scheda => {
     assegnaSlotDefaultImport(scheda);
     scheda.reparti.forEach(rep => {
-      rep.candidati = rep.giocatori.map((g, gIdx) => {
+      rep.candidati = rep.giocatori.map(g => {
         const match = trovaGiocatoreCorrispondente(g.grezzo);
-        const slotId = (rep.slotIdsPerGiocatore && rep.slotIdsPerGiocatore[gIdx]) || rep.slotIdDefault;
-        return { grezzo: g.grezzo, match, slotId, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "", stato: g.stato || null, coloreGrezzo: g.coloreGrezzo || null };
+        return { grezzo: g.grezzo, match, slotId: rep.slotIdDefault, includi: true, klub: g.klub || "", jg: g.jg || "", fuss: g.fuss || "", stato: g.stato || null, coloreGrezzo: g.coloreGrezzo || null };
       });
     });
   });
@@ -10541,26 +9992,6 @@ function renderRadunoImporta(content) {
       bozza.schede[si].reparti[repI].candidati[cIdx].stato = sel.value || null;
     });
   });
-  content.querySelectorAll("[data-cambia-modulo-scheda]").forEach(sel => {
-    sel.addEventListener("change", () => {
-      const si = Number(sel.dataset.cambiaModuloScheda);
-      const s = bozza.schede[si];
-      s.modulo = sel.value;
-      // Ricalcoliamo lo slot di destinazione di default per ogni reparto sul
-      // nuovo modulo scelto, e riportiamo anche i candidati già mostrati sul
-      // nuovo default: cambiare modulo qui avviene tipicamente come primo
-      // passo in revisione, prima di correggere manualmente i singoli
-      // giocatori, quindi ha senso far ripartire l'assegnazione automatica
-      // invece di lasciare gli slot calcolati sul modulo sbagliato.
-      assegnaSlotDefaultImport(s);
-      s.reparti.forEach(rep => {
-        rep.candidati.forEach((c, cIdx) => {
-          c.slotId = (rep.slotIdsPerGiocatore && rep.slotIdsPerGiocatore[cIdx]) || rep.slotIdDefault;
-        });
-      });
-      render();
-    });
-  });
 }
 
 function radunoSchedaImportHTML(s, si, targetRaduno) {
@@ -10570,22 +10001,13 @@ function radunoSchedaImportHTML(s, si, targetRaduno) {
   // rilevato (es. varianti regionali). Li aggiungiamo come opzioni extra così
   // da non perdere nessun giocatore durante la revisione.
   const chiaviBase = new Set(slotsBase.map(r => r.chiave));
-  const chiaviExtra = [...new Set(s.reparti.map(r => chiaveEffettiva(r.chiave, s.modulo)).filter(k => !chiaviBase.has(k)))];
+  const chiaviExtra = [...new Set(s.reparti.map(r => r.chiave).filter(k => !chiaviBase.has(k)))];
   const repartiOptions = [...slotsBase, ...chiaviExtra.map(k => ({ id: k, chiave: k, nome: k, personalizzato: true }))];
   const totCandidati = s.reparti.reduce((n, rep) => n + rep.candidati.length, 0);
   const totMatch = s.reparti.reduce((n, rep) => n + rep.candidati.filter(c => c.match).length, 0);
   return `
     <div class="import-subsection">
-      <h3>${esc(s.nome)}</h3>
-      <div style="display:flex; align-items:center; gap:8px; margin:2px 0 8px; flex-wrap:wrap;">
-        <label style="font-size:12.5px; display:flex; align-items:center; gap:6px;">
-          Modulo:
-          <select data-cambia-modulo-scheda="${si}">
-            ${MODULI_RADUNO.map(m => `<option value="${esc(m)}" ${s.modulo === m ? "selected" : ""}>${esc(m)}</option>`).join("")}
-          </select>
-        </label>
-        ${s.moduloCandidati && s.moduloCandidati.length > 1 ? `<span class="chip" style="font-size:11.5px; background:#ffedd5; color:#9a3412;" title="Il file elenca più sistemi di gioco possibili (${esc(s.moduloCandidati.join(", "))}) senza indicare quale sia quello in uso per questa rosa: ho preselezionato il primo, ma controlla e correggi se serve.">⚠️ Modulo non certo — verifica</span>` : ""}
-      </div>
+      <h3>${esc(s.nome)} ${s.modulo ? `<span class="chip" style="margin-left:8px;">${esc(s.modulo)}</span>` : ""}</h3>
       <p class="muted" style="font-size:12.5px;">
         ${s.luogo ? esc(s.luogo) + " · " : ""}${s.stagione ? "Stagione " + esc(s.stagione) + " · " : ""}
         ${s.trainer ? "Trainer: " + esc(s.trainer) + " · " : ""}
@@ -10918,7 +10340,6 @@ function esportaRadunoExcel(r) {
 let allenatoriSezione = "lista";
 let allenatoreCorrenteId = null;
 let filtroTestoAllenatori = "";
-let filtroCategoriaAllenatori = "tutte";
 
 function trovaAllenatoriPerSquadra(nomeSquadra) {
   const ric = analizzaNomeSquadra(nomeSquadra);
@@ -10996,65 +10417,37 @@ function renderAllenatoriLista(content) {
         <button class="btn btn-primary" id="btn-nuovo-allenatore">+ Nuovo allenatore</button>
       </div>
       <div class="filtri-bar" style="margin-top:14px;">
-        <input type="text" id="f-allenatori-testo" class="f-input f-testo" placeholder="Cerca allenatore, squadra, categoria o giocatore..." value="${esc(filtroTestoAllenatori)}">
-        <select id="f-allenatori-categoria" class="f-input">
-          <option value="tutte" ${filtroCategoriaAllenatori === "tutte" ? "selected" : ""}>Tutte le categorie</option>
-          ${CATEGORIE_FISSE.map(c => `<option value="${esc(c)}" ${filtroCategoriaAllenatori === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          <option value="nessuna" ${filtroCategoriaAllenatori === "nessuna" ? "selected" : ""}>Senza categoria</option>
-        </select>
+        <input type="text" id="f-allenatori-testo" class="f-input f-testo" placeholder="Cerca nome o squadra..." value="${esc(filtroTestoAllenatori)}">
       </div>
       <div class="import-subsection" id="allenatori-container"></div>
     </div>
   `;
   document.getElementById("btn-nuovo-allenatore").onclick = () => { allenatoreCorrenteId = null; allenatoriSezione = "form"; render(); };
   document.getElementById("f-allenatori-testo").oninput = (e) => { filtroTestoAllenatori = e.target.value; renderAllenatoriRisultati(); };
-  document.getElementById("f-allenatori-categoria").onchange = (e) => { filtroCategoriaAllenatori = e.target.value; renderAllenatoriRisultati(); };
   renderAllenatoriRisultati();
-}
-
-// Ordine di visualizzazione delle categorie: dalla più giovane alla Prima
-// Squadra, seguendo lo stesso ordine di CATEGORIE_FISSE usato ovunque nel
-// resto dell'app. Chi non ha nessuna categoria assegnata (unico allenatore
-// del club) va in fondo, dopo la Prima Squadra.
-function ordinaleCategoriaAllenatore(categoria) {
-  if (!categoria) return CATEGORIE_FISSE.length;
-  const i = CATEGORIE_FISSE.indexOf(categoria);
-  return i === -1 ? CATEGORIE_FISSE.length : i;
 }
 
 function renderAllenatoriRisultati() {
   const container = document.getElementById("allenatori-container");
   if (!container) return;
   const q = filtroTestoAllenatori.trim().toLowerCase();
+  const elenco = allenatori
+    .filter(a => !q || `${a.nome || ""} ${a.squadra || ""}`.toLowerCase().includes(q))
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
 
-  // Nomi dei giocatori collegati a ciascun allenatore: servono sia per il
-  // conteggio mostrato in ogni scheda, sia per poter cercare "Puddu" nella
-  // barra di ricerca e trovare l'allenatore del suo giocatore.
+  // Conta i giocatori collegati a ciascun allenatore in UN solo giro su
+  // tutti i giocatori (invece di richiamare giocatoriDiAllenatore — che
+  // scorre l'intera rubrica allenatori per OGNI giocatore — una volta per
+  // ciascuna scheda allenatore mostrata: con molte voci in rubrica quel
+  // conteggio ripetuto era diventato il vero collo di bottiglia della
+  // pagina, vedi commento su analizzaNomeSquadra).
   const conteggioGiocatoriPerAllenatore = new Map();
-  const giocatoriPerAllenatore = new Map();
   players.forEach(p => {
     const r = allenatoreDelGiocatore(p);
     if (r.allenatore) {
       conteggioGiocatoriPerAllenatore.set(r.allenatore.id, (conteggioGiocatoriPerAllenatore.get(r.allenatore.id) || 0) + 1);
-      if (!giocatoriPerAllenatore.has(r.allenatore.id)) giocatoriPerAllenatore.set(r.allenatore.id, []);
-      giocatoriPerAllenatore.get(r.allenatore.id).push(`${p.cognome || ""} ${p.nome || ""}`.trim());
     }
   });
-
-  const elenco = allenatori
-    .filter(a => filtroCategoriaAllenatori === "tutte"
-      || (filtroCategoriaAllenatori === "nessuna" ? !a.categoria : a.categoria === filtroCategoriaAllenatori))
-    .filter(a => {
-      if (!q) return true;
-      const nomiGiocatori = (giocatoriPerAllenatore.get(a.id) || []).join(" ");
-      const haystack = `${a.nome || ""} ${a.squadra || ""} ${a.categoria || ""} ${nomiGiocatori}`.toLowerCase();
-      return haystack.includes(q);
-    })
-    .sort((a, b) => {
-      const oa = ordinaleCategoriaAllenatore(a.categoria), ob = ordinaleCategoriaAllenatore(b.categoria);
-      if (oa !== ob) return oa - ob;
-      return (a.nome || "").localeCompare(b.nome || "", "it");
-    });
 
   container.innerHTML = elenco.length
     ? elenco.map(a => allenatoreCardHTML(a, conteggioGiocatoriPerAllenatore.get(a.id) || 0)).join("")
