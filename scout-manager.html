@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 05/08/2026 · 21:59</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 09:47</div>
         </div>
       </div>
     </header>
@@ -7754,8 +7754,6 @@ function renderStrumenti(content) {
         <div id="mnt-backup-result"></div>
       </div>
 
-      ${renderGoogleCalendarStatusHTML()}
-
       <div class="import-subsection">
         <h3>Riassunto AI</h3>
         <p class="muted">Per generare un riassunto automatico del profilo di un giocatore serve una chiave API. Le chiavi restano salvate solo su questo dispositivo/browser e parlano direttamente con il servizio scelto — non passano da nessun altro server.</p>
@@ -7969,7 +7967,6 @@ function renderStrumenti(content) {
 
   const notaBackupEl = document.getElementById("nota-backup-automatico");
   if (notaBackupEl) renderNotaBackupAutomatico(notaBackupEl);
-  wireGoogleCalendarStatusHTML(content);
   document.getElementById("mnt-btn-backup-ora").onclick = async () => {
     const risultato = document.getElementById("mnt-backup-result");
     if (!dropboxConnesso) { risultato.innerHTML = `<div class="import-result import-result-warn">Connettiti prima a Dropbox (in fondo alla pagina).</div>`; return; }
@@ -8195,18 +8192,50 @@ async function cercaPartiteWeekend(content, da, a) {
 
   try {
     await Promise.all(Array.from({ length: CONCORRENZA }, lavoratore));
-    const risultati = tutteLePartite.map(partita => {
-      const infoCompetizione = COMPETIZIONI_MATCHCENTER.find(c => c.nome === partita.competizione);
-      const categoria = infoCompetizione ? infoCompetizione.categoria : (partita.categoria || null);
-      const giocatoriCasa = trovaGiocatoriPerSquadraECategoria(partita.casa, categoria);
-      const giocatoriOspite = trovaGiocatoriPerSquadraECategoria(partita.ospite, categoria);
-      return { ...partita, giocatoriCasa, giocatoriOspite };
-    });
+    const risultati = arricchisciPartiteConGiocatori(tutteLePartite);
     weekendRicerca = { inCorso: false, errore: null, diagnostica: tuttaLaDiagnostica.length ? tuttaLaDiagnostica : null, risultati, da, a };
   } catch (e) {
     console.error(e);
     weekendRicerca = { inCorso: false, errore: e.message, diagnostica: tuttaLaDiagnostica.length ? tuttaLaDiagnostica : null, risultati: null, da, a };
   }
+  renderCalendario(content);
+}
+
+// Stessa logica di cross-reference partita->giocatori usata da
+// cercaPartiteWeekend (chiamata dal Worker), estratta a parte così può
+// essere riusata anche da importaPartiteWeekendDaFile qui sotto: quando
+// non si hanno più crediti sul Worker Cloudflare (es. piano gratuito
+// ScrapeOps esaurito), le partite del weekend possono essere trovate a
+// mano/con una ricerca web e incollate in un file JSON con la stessa
+// forma restituita dal Worker ({ partite: [{data, ora, competizione,
+// casa, ospite}, ...] }) — la app fa comunque lei il riconoscimento dei
+// giocatori collegati, l'utente non deve calcolarlo a mano.
+function arricchisciPartiteConGiocatori(partite) {
+  return partite.map(partita => {
+    const infoCompetizione = COMPETIZIONI_MATCHCENTER.find(c => c.nome === partita.competizione);
+    const categoria = infoCompetizione ? infoCompetizione.categoria : (partita.categoria || null);
+    const giocatoriCasa = trovaGiocatoriPerSquadraECategoria(partita.casa, categoria);
+    const giocatoriOspite = trovaGiocatoriPerSquadraECategoria(partita.ospite, categoria);
+    return { ...partita, giocatoriCasa, giocatoriOspite };
+  });
+}
+
+// Percorso alternativo al Worker Cloudflare: importa un file JSON
+// preparato a mano (o da un'altra ricerca) con la lista di partite già
+// trovate, nella stessa forma { partite: [...] } che il Worker
+// restituirebbe per ogni competizione. Non fa nessuna chiamata di rete.
+function importaPartiteWeekendDaFile(content, dati) {
+  const partite = Array.isArray(dati) ? dati : (Array.isArray(dati.partite) ? dati.partite : null);
+  if (!partite) {
+    alert("File non riconosciuto: mi aspetto un JSON con { \"partite\": [ {data, ora, competizione, casa, ospite}, ... ] }.");
+    return;
+  }
+  const risultati = arricchisciPartiteConGiocatori(partite);
+  const date = partite.map(p => p.data).filter(Boolean).sort();
+  weekendRicerca = {
+    inCorso: false, errore: null, diagnostica: null, risultati,
+    da: date[0] || weekendRicerca.da, a: date[date.length - 1] || weekendRicerca.a
+  };
   renderCalendario(content);
 }
 
@@ -8216,7 +8245,14 @@ function renderRicercaWeekendHTML() {
   const da = w.da || weekendDefault.da;
   const a = w.a || weekendDefault.a;
 
-  if (!weekendWorkerUrl) {
+  const importaFileHTML = `
+    <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+      Carica risultati da file JSON
+      <input type="file" accept=".json" id="input-importa-weekend-file" style="display:none;">
+    </label>`;
+  const importaFileSpiegazioneHTML = `<p class="muted" style="font-size:12px;">Alternativa al Worker (utile se hai finito i crediti del proxy): carica un file JSON con le partite già trovate, nella forma <span class="mono">{"partite":[{"data":"2026-08-08","ora":"18:00","competizione":"Super League","casa":"...","ospite":"..."}]}</span> — la app riconosce comunque da sola i giocatori collegati.</p>`;
+
+  if (!weekendWorkerUrl && !w.risultati) {
     return `
       <div class="import-subsection">
         <h3>Cerca partite del weekend</h3>
@@ -8226,7 +8262,9 @@ function renderRicercaWeekendHTML() {
         </label>
         <div class="import-actions">
           <button class="btn btn-primary" id="btn-salva-weekend-worker-url">Salva indirizzo</button>
+          ${importaFileHTML}
         </div>
+        ${importaFileSpiegazioneHTML}
       </div>`;
   }
 
@@ -8315,26 +8353,57 @@ function renderRicercaWeekendHTML() {
         </label>
       </div>
       <div class="import-actions">
-        <button class="btn btn-primary" id="btn-cerca-weekend" ${w.inCorso ? "disabled" : ""}>${w.inCorso ? "Ricerca in corso…" : "Cerca partite"}</button>
-        <button class="btn btn-ghost btn-sm" id="btn-cambia-weekend-worker-url">Cambia indirizzo Worker</button>
+        ${weekendWorkerUrl ? `<button class="btn btn-primary" id="btn-cerca-weekend" ${w.inCorso ? "disabled" : ""}>${w.inCorso ? "Ricerca in corso…" : "Cerca partite"}</button>` : ""}
+        ${importaFileHTML}
+        ${weekendWorkerUrl ? `<button class="btn btn-ghost btn-sm" id="btn-cambia-weekend-worker-url">Cambia indirizzo Worker</button>` : `<button class="btn btn-ghost btn-sm" id="btn-imposta-weekend-worker-url">Imposta Worker Cloudflare</button>`}
       </div>
+      ${!weekendWorkerUrl ? importaFileSpiegazioneHTML : ""}
       ${risultatiHTML}
       ${diagnosticaHTML}
     </div>`;
 }
 
-function wireRicercaWeekendHTML(content) {
-  if (!weekendWorkerUrl) {
-    const btn = document.getElementById("btn-salva-weekend-worker-url");
-    if (btn) btn.onclick = async () => {
-      const url = document.getElementById("weekend-worker-url-input").value.trim();
-      if (!url) return;
-      weekendWorkerUrl = url;
-      await idbSet("weekend-worker-url", url);
-      renderCalendario(content);
+// Collega l'input file "Carica risultati da file JSON", presente in
+// entrambi gli stati (con o senza Worker configurato) di
+// renderRicercaWeekendHTML.
+function wireImportaWeekendFile(content) {
+  const input = document.getElementById("input-importa-weekend-file");
+  if (!input) return;
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let dati;
+      try { dati = JSON.parse(reader.result); }
+      catch (e) { alert("File JSON non valido: " + e.message); return; }
+      importaPartiteWeekendDaFile(content, dati);
     };
-    return;
-  }
+    reader.readAsText(file);
+  };
+}
+
+function wireRicercaWeekendHTML(content) {
+  wireImportaWeekendFile(content);
+  const salvaUrlWorker = async () => {
+    const url = document.getElementById("weekend-worker-url-input").value.trim();
+    if (!url) return;
+    weekendWorkerUrl = url;
+    await idbSet("weekend-worker-url", url);
+    renderCalendario(content);
+  };
+  const btnSalva = document.getElementById("btn-salva-weekend-worker-url");
+  if (btnSalva) btnSalva.onclick = salvaUrlWorker;
+  const btnImposta = document.getElementById("btn-imposta-weekend-worker-url");
+  if (btnImposta) btnImposta.onclick = () => {
+    // Nella vista risultati (import da file, senza Worker salvato) non
+    // c'è il campo url visibile: lo chiediamo al volo con un prompt.
+    const url = prompt("Indirizzo del Worker Cloudflare (https://tuoworker.tuonome.workers.dev):", "");
+    if (!url) return;
+    weekendWorkerUrl = url.trim();
+    idbSet("weekend-worker-url", weekendWorkerUrl).then(() => renderCalendario(content));
+  };
+  if (!weekendWorkerUrl && !weekendRicerca.risultati) return;
   const btnCerca = document.getElementById("btn-cerca-weekend");
   if (btnCerca) btnCerca.onclick = () => {
     const da = document.getElementById("weekend-da").value;
@@ -8431,6 +8500,8 @@ function renderCalendario(content) {
       </div>
 
       ${renderRicercaWeekendHTML()}
+
+      ${renderGoogleCalendarStatusHTML()}
 
       <div class="import-subsection">
         <h3>Prossimi eventi</h3>
@@ -8539,6 +8610,7 @@ function renderCalendario(content) {
     };
   });
   wireRicercaWeekendHTML(content);
+  wireGoogleCalendarStatusHTML(content);
 }
 
 // Parole generiche che non identificano il club (prefissi societari, sigle
