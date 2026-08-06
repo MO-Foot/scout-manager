@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 09:47</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 06/08/2026 · 10:04</div>
         </div>
       </div>
     </header>
@@ -8305,20 +8305,26 @@ function renderRicercaWeekendHTML() {
     } else {
       risultatiHTML = `
         <div class="cal-weekend-risultati">
-          ${conGiocatori.map((p, i) => `
+          ${conGiocatori.map((p, i) => {
+            const giaAggiunto = p.eventoAggiuntoId && eventi.some(e => e.id === p.eventoAggiuntoId);
+            const bottoneAggiungiHTML = giaAggiunto
+              ? `<button class="btn btn-ghost btn-sm" data-weekend-vai-a-evento="${esc(p.eventoAggiuntoId)}" style="opacity:0.8;">✓ Aggiunto — apri/modifica</button>`
+              : `<button class="btn btn-ghost btn-sm" data-weekend-aggiungi="${i}">+ Aggiungi a calendario</button>`;
+            return `
             <div class="candidato-card" style="margin-bottom:10px;">
               <div class="candidato-card-header">
                 <strong class="mono">${formatDataIt(p.data)}</strong> <span class="mono">${esc(p.ora)}</span> — ${esc(p.competizione)}
                 <span class="chip" style="margin-left:8px;">${esc(p.casa)} - ${esc(p.ospite)}</span>
                 <div class="import-actions">
-                  <button class="btn btn-ghost btn-sm" data-weekend-aggiungi="${i}">+ Aggiungi a calendario</button>
+                  ${bottoneAggiungiHTML}
                 </div>
               </div>
               <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:6px;">
                 ${colonnaSquadra(p.casa, p.giocatoriCasa)}
                 ${colonnaSquadra(p.ospite, p.giocatoriOspite)}
               </div>
-            </div>`).join("")}
+            </div>`;
+          }).join("")}
         </div>
         ${senzaGiocatori ? `<p class="muted">(+ altre ${senzaGiocatori} partite trovate in queste date senza giocatori tuoi, non mostrate)</p>` : ""}
       `;
@@ -8343,7 +8349,7 @@ function renderRicercaWeekendHTML() {
   return `
     <div class="import-subsection">
       <h3>Cerca partite del weekend</h3>
-      <p class="muted">Cerca sul matchcenter della Federazione le partite del weekend che coinvolgono squadre/categorie della tua banca dati. La lista è solo da consultare: nessun evento viene aggiunto al calendario finché non premi tu "+ Aggiungi a calendario" su una partita.</p>
+      <p class="muted">Cerca sul matchcenter della Federazione le partite del weekend che coinvolgono squadre/categorie della tua banca dati. La lista è solo da consultare: nessun evento viene aggiunto al calendario finché non premi tu "+ Aggiungi a calendario" su una partita — un clic ed è già salvato, sotto in "Prossimi eventi".</p>
       <div class="form-grid">
         <label>Da
           <input type="date" id="weekend-da" value="${esc(da)}">
@@ -8356,6 +8362,7 @@ function renderRicercaWeekendHTML() {
         ${weekendWorkerUrl ? `<button class="btn btn-primary" id="btn-cerca-weekend" ${w.inCorso ? "disabled" : ""}>${w.inCorso ? "Ricerca in corso…" : "Cerca partite"}</button>` : ""}
         ${importaFileHTML}
         ${weekendWorkerUrl ? `<button class="btn btn-ghost btn-sm" id="btn-cambia-weekend-worker-url">Cambia indirizzo Worker</button>` : `<button class="btn btn-ghost btn-sm" id="btn-imposta-weekend-worker-url">Imposta Worker Cloudflare</button>`}
+        ${w.risultati ? `<button class="btn btn-ghost btn-sm" id="btn-chiudi-weekend-risultati">Chiudi elenco partite</button>` : ""}
       </div>
       ${!weekendWorkerUrl ? importaFileSpiegazioneHTML : ""}
       ${risultatiHTML}
@@ -8420,21 +8427,44 @@ function wireRicercaWeekendHTML(content) {
     weekendRicerca = { inCorso: false, errore: null, diagnostica: null, risultati: null, da: null, a: null };
     renderCalendario(content);
   };
+  // Chiude/nasconde l'elenco delle partite trovate (da Worker o da file
+  // importato) senza toccare l'indirizzo del Worker salvato — serve solo a
+  // "svuotare la vista" e tornare a un Calendario pulito una volta che le
+  // partite che servivano sono già state aggiunte.
+  const btnChiudiRisultati = document.getElementById("btn-chiudi-weekend-risultati");
+  if (btnChiudiRisultati) btnChiudiRisultati.onclick = () => {
+    weekendRicerca = { inCorso: false, errore: null, diagnostica: null, risultati: null, da: null, a: null };
+    renderCalendario(content);
+  };
   if (weekendRicerca.risultati) {
     const conGiocatoriPerAggiungi = r => r.giocatoriCasa.confermati.length || r.giocatoriCasa.possibili.length
       || r.giocatoriOspite.confermati.length || r.giocatoriOspite.possibili.length;
+    // Un solo clic: crea subito l'evento (Partita/Scouting) e lo salva —
+    // non serve più passare dal form "Nuovo evento" qui sopra. Il pulsante
+    // della partita diventa poi "✓ Aggiunto — apri/modifica" (vedi
+    // renderRicercaWeekendHTML), che riapre quello stesso evento per
+    // ritoccarlo se serve.
     content.querySelectorAll("[data-weekend-aggiungi]").forEach(btn => {
       btn.onclick = () => {
         const p = weekendRicerca.risultati.filter(conGiocatoriPerAggiungi)[Number(btn.dataset.weekendAggiungi)];
         if (!p) return;
-        calEventoInModifica = null;
+        const eventoSalvato = {
+          id: uid(), data: p.data, dataFine: "", tipo: "Partita", categoria: "Scouting",
+          luogo: `${p.casa} - ${p.ospite}`, note: p.competizione, tuttoIlGiorno: false,
+          oraInizio: p.ora, oraFine: "", giocatoriIds: [], modificatoIl: new Date().toISOString(),
+          googleEventId: null, googleUpdated: null
+        };
+        eventi.push(eventoSalvato);
+        p.eventoAggiuntoId = eventoSalvato.id;
+        savePlayers();
         renderCalendario(content);
-        document.getElementById("cal-data").value = p.data;
-        document.getElementById("cal-tipo").value = "Partita";
-        document.getElementById("cal-luogo").value = `${p.casa} - ${p.ospite}`;
-        document.getElementById("cal-tutto-giorno").checked = false;
-        document.getElementById("cal-ora-inizio").value = p.ora;
-        document.getElementById("cal-note").value = p.competizione;
+        pushEventoAGoogleSeConnesso(eventoSalvato);
+      };
+    });
+    content.querySelectorAll("[data-weekend-vai-a-evento]").forEach(btn => {
+      btn.onclick = () => {
+        calEventoInModifica = btn.dataset.weekendVaiAEvento;
+        renderCalendario(content);
         window.scrollTo(0, 0);
       };
     });
