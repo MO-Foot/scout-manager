@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 01:00</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 01:20</div>
         </div>
       </div>
     </header>
@@ -7770,7 +7770,7 @@ function renderPresenze(content) {
   document.getElementById("fp-competizione").onchange = e => { filtroPresenzeCompetizione = e.target.value; renderPresenze(content); };
   // Esporta esattamente quello che stai vedendo: i filtri di ricerca e
   // competizione valgono anche per il file scaricato.
-  document.getElementById("fp-report").onclick = () => esportaReportPresenze(righeFiltrate);
+  document.getElementById("fp-report").onclick = () => apriModalReportPresenze();
 
   content.querySelectorAll(".presenze-settimana").forEach(det => {
     det.addEventListener("toggle", () => { if (det.open) settimanaApertaPresenze = det.dataset.key; });
@@ -7781,28 +7781,174 @@ function renderPresenze(content) {
   });
 }
 
-// Esporta in Excel le presenze settimanali. Riceve già le righe filtrate dalla
-// schermata Presenze, così il file rispecchia esattamente ciò che vedi a
-// schermo (ricerca per nome/squadra + filtro competizione).
-// Due fogli: "Partite" con una riga per presenza, e "Riepilogo" con una riga
-// per giocatore — quest'ultimo serve proprio a vedere al volo chi ha giocato,
-// chi no e quanti minuti ha messo insieme nel periodo mostrato.
-function esportaReportPresenze(righeFiltrate) {
-  if (!righeFiltrate || !righeFiltrate.length) {
-    alert("Nessuna partita da esportare con i filtri attuali.");
+// Finestra di scelta per il report delle presenze: quali giocatori (tutti o
+// per etichetta) e quali settimane (anche più di una, non per forza
+// consecutive). La selezione la fa tutta questa finestra: i filtri di ricerca
+// in cima alla schermata Presenze qui non contano, così il file scaricato
+// dipende solo da quello che spunti e non da cosa avevi lasciato scritto nella
+// barra di ricerca.
+function apriModalReportPresenze() {
+  const root = document.getElementById("modal-root");
+  if (!root) return;
+
+  const righeTutte = [];
+  players.forEach(p => (p.partiteUfficiali || []).forEach(m => {
+    if (m.data) righeTutte.push({ player: p, m });
+  }));
+
+  const settimaneMap = new Map();
+  righeTutte.forEach(r => {
+    const lun = lunediSettimanaDi(r.m.data);
+    const key = isoLocale(lun);
+    if (!settimaneMap.has(key)) settimaneMap.set(key, { lunedi: lun, domenica: domenicaSettimanaDi(lun), righe: [] });
+    settimaneMap.get(key).righe.push(r);
+  });
+  const settimaneOrdinate = [...settimaneMap.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+
+  if (!settimaneOrdinate.length) {
+    alert("Non c'è ancora nessuna partita registrata da esportare.");
     return;
   }
+
+  const tutteLeEtichette = [...new Set(players.flatMap(p => p.etichette || []))].sort();
+  const conteggioEtichette = {};
+  players.forEach(p => (p.etichette || []).forEach(e => { conteggioEtichette[e] = (conteggioEtichette[e] || 0) + 1; }));
+
+  // Di default parte spuntata solo la settimana più recente: è il caso d'uso
+  // normale (il report del weekend appena passato). Le altre si aggiungono con
+  // un clic, o tutte insieme col pulsante "Tutte".
+  const settimanaPiuRecente = settimaneOrdinate[0][0];
+
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay-report-presenze">
+      <div class="modal-box modal-box-wide">
+        <button class="modal-close no-print" id="modal-close-report-presenze" title="Chiudi">✕</button>
+        <h2>Report presenze partite</h2>
+
+        <div class="import-subsection">
+          <h3>Giocatori da includere</h3>
+          <div class="import-controls" style="margin-bottom:8px;">
+            <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="rp-fonte" value="tutti" checked> Tutti i giocatori (${players.length})</label>
+            <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="rp-fonte" value="etichette"> Solo per etichetta, qui sotto</label>
+          </div>
+          <div id="rp-etichette-wrap" style="display:none;">
+            <p class="muted" style="margin:0 0 6px;">Spunta una o più etichette — a un giocatore basta averne almeno una per entrare nel report.</p>
+            <div class="report-campi-grid">
+              ${tutteLeEtichette.map(e => `
+                <label class="report-campo-check">
+                  <input type="checkbox" class="rp-etichetta" value="${esc(e)}">
+                  ${esc(e)} (${conteggioEtichette[e]})
+                </label>`).join("")}
+            </div>
+          </div>
+        </div>
+
+        <div class="import-subsection">
+          <h3>Settimane</h3>
+          <div class="import-controls" style="margin-bottom:8px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="rp-sett-tutte">Tutte</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="rp-sett-nessuna">Nessuna</button>
+          </div>
+          <div class="report-campi-grid">
+            ${settimaneOrdinate.map(([key, sett]) => `
+              <label class="report-campo-check">
+                <input type="checkbox" class="rp-settimana" value="${esc(key)}" ${key === settimanaPiuRecente ? "checked" : ""}>
+                ${esc(formatRangeSettimana(sett.lunedi, sett.domenica))} (${sett.righe.length})
+              </label>`).join("")}
+          </div>
+        </div>
+
+        <p class="muted" id="rp-conteggio" style="margin-top:4px;"></p>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" id="rp-genera">Genera report</button>
+        </div>
+      </div>
+    </div>`;
+
+  function giocatoriSelezionati() {
+    const fonte = document.querySelector('input[name="rp-fonte"]:checked').value;
+    if (fonte === "tutti") return players.slice();
+    const scelte = [...document.querySelectorAll(".rp-etichetta:checked")].map(el => el.value);
+    if (!scelte.length) return [];
+    return players.filter(p => (p.etichette || []).some(e => scelte.includes(e)));
+  }
+  function settimaneSelezionate() {
+    return [...document.querySelectorAll(".rp-settimana:checked")].map(el => el.value);
+  }
+  function aggiornaConteggio() {
+    const g = giocatoriSelezionati();
+    const ids = new Set(g.map(p => p.id));
+    const keys = settimaneSelezionate();
+    let partite = 0;
+    keys.forEach(k => (settimaneMap.get(k)?.righe || []).forEach(r => { if (ids.has(r.player.id)) partite++; }));
+    const conGare = new Set();
+    keys.forEach(k => (settimaneMap.get(k)?.righe || []).forEach(r => { if (ids.has(r.player.id)) conGare.add(r.player.id); }));
+    document.getElementById("rp-conteggio").innerHTML =
+      `Il report includerà <strong>${g.length}</strong> giocatori su <strong>${keys.length}</strong> settiman${keys.length === 1 ? "a" : "e"}: ` +
+      `<strong>${partite}</strong> presenze registrate, e <strong>${g.length - conGare.size}</strong> giocatori senza nessuna partita nel periodo (usciranno con la riga a zero).`;
+  }
+
+  document.querySelectorAll('input[name="rp-fonte"]').forEach(el => el.onchange = () => {
+    const fonte = document.querySelector('input[name="rp-fonte"]:checked').value;
+    document.getElementById("rp-etichette-wrap").style.display = fonte === "etichette" ? "" : "none";
+    aggiornaConteggio();
+  });
+  document.querySelectorAll(".rp-etichetta, .rp-settimana").forEach(el => el.onchange = aggiornaConteggio);
+  document.getElementById("rp-sett-tutte").onclick = () => {
+    document.querySelectorAll(".rp-settimana").forEach(el => { el.checked = true; });
+    aggiornaConteggio();
+  };
+  document.getElementById("rp-sett-nessuna").onclick = () => {
+    document.querySelectorAll(".rp-settimana").forEach(el => { el.checked = false; });
+    aggiornaConteggio();
+  };
+  aggiornaConteggio();
+
+  document.getElementById("rp-genera").onclick = () => {
+    const g = giocatoriSelezionati();
+    const keys = settimaneSelezionate();
+    if (!g.length) { alert("Nessun giocatore selezionato — spunta almeno un'etichetta, oppure scegli \"Tutti i giocatori\"."); return; }
+    if (!keys.length) { alert("Nessuna settimana selezionata — spuntane almeno una."); return; }
+    esportaReportPresenze(g, keys, settimaneMap);
+    root.innerHTML = "";
+  };
+
+  document.getElementById("modal-close-report-presenze").onclick = () => { root.innerHTML = ""; };
+  document.getElementById("modal-overlay-report-presenze").onclick = e => {
+    if (e.target.id === "modal-overlay-report-presenze") root.innerHTML = "";
+  };
+}
+
+// Costruisce il file Excel delle presenze. Due fogli:
+// "Partite"   — una riga per presenza, settimane recenti in alto e, dentro ogni
+//               settimana, chi ha giocato di più prima di chi ha giocato meno.
+// "Riepilogo" — una riga per giocatore, ordinata per minuti totali, con i
+//               totali del periodo e in più una colonna di minuti per ogni
+//               settimana scelta. I giocatori senza partite nel periodo ci sono
+//               lo stesso, con gli zeri: sono quelli che interessa vedere.
+function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap) {
+  if (!giocatoriSel || !giocatoriSel.length) { alert("Nessun giocatore selezionato."); return; }
+  if (!settimaneKeys || !settimaneKeys.length) { alert("Nessuna settimana selezionata."); return; }
+
   const minutiDi = m => (m.minutiGiocati !== null && m.minutiGiocati !== undefined && m.minutiGiocati !== "")
     ? Number(m.minutiGiocati) : null;
 
-  // Settimane più recenti in alto e, dentro ogni settimana, chi ha giocato di
-  // più prima di chi ha giocato meno (in fondo panchinari e non convocati).
-  // Ordinare per settimana e non per data secca serve proprio a questo:
-  // altrimenti dentro la stessa settimana le partite si mescolerebbero per
-  // giorno e la classifica dei minuti si spezzerebbe.
-  const settimanaDi = m => isoLocale(lunediSettimanaDi(m.data));
-  const ordinate = righeFiltrate.slice().sort((a, b) => {
-    const perSettimana = settimanaDi(b.m).localeCompare(settimanaDi(a.m));
+  const keysOrdinate = settimaneKeys.slice().sort((a, b) => b.localeCompare(a));
+  const etichettaSettimana = {};
+  keysOrdinate.forEach(k => {
+    const s = settimaneMap.get(k);
+    etichettaSettimana[k] = s ? formatRangeSettimana(s.lunedi, s.domenica) : k;
+  });
+
+  const idsSel = new Set(giocatoriSel.map(p => p.id));
+  const righeSel = [];
+  keysOrdinate.forEach(k => (settimaneMap.get(k)?.righe || []).forEach(r => {
+    if (idsSel.has(r.player.id)) righeSel.push({ player: r.player, m: r.m, settimana: k });
+  }));
+
+  righeSel.sort((a, b) => {
+    const perSettimana = b.settimana.localeCompare(a.settimana);
     if (perSettimana) return perSettimana;
     const minA = minutiDi(a.m) ?? -1, minB = minutiDi(b.m) ?? -1;
     if (minB !== minA) return minB - minA;
@@ -7811,54 +7957,66 @@ function esportaReportPresenze(righeFiltrate) {
 
   const intestazionePartite = ["Settimana", "Data", "Cognome", "Nome", "Squadra", "Avversario",
     "Risultato", "Competizione", "Presenza", "Minuti", "Gol", "Note", "Link"];
-  const righePartite = ordinate.map(({ player: p, m }) => {
-    const lun = lunediSettimanaDi(m.data);
-    return [
-      formatRangeSettimana(lun, domenicaSettimanaDi(lun)),
-      formatDataIt(m.data),
-      p.cognome || "", p.nome || "",
-      m.squadra || p.squadra || "", m.avversario || "",
-      m.risultato || "", m.competizione || "", m.presenza || "",
-      minutiDi(m) ?? "", (m.gol !== null && m.gol !== undefined && m.gol !== "") ? Number(m.gol) : "",
-      m.note || "", m.link || ""
-    ];
-  });
+  const righePartite = righeSel.map(({ player: p, m, settimana }) => [
+    etichettaSettimana[settimana],
+    formatDataIt(m.data),
+    p.cognome || "", p.nome || "",
+    m.squadra || p.squadra || "", m.avversario || "",
+    m.risultato || "", m.competizione || "", m.presenza || "",
+    minutiDi(m) ?? "", (m.gol !== null && m.gol !== undefined && m.gol !== "") ? Number(m.gol) : "",
+    m.note || "", m.link || ""
+  ]);
 
-  // Riepilogo per giocatore sul periodo mostrato.
-  const perGiocatore = new Map();
-  ordinate.forEach(({ player: p, m }) => {
-    if (!perGiocatore.has(p.id)) {
-      perGiocatore.set(p.id, {
-        cognome: p.cognome || "", nome: p.nome || "", squadra: p.squadra || "",
-        partite: 0, titolare: 0, subentrato: 0, panchina: 0, nonConvocato: 0, minuti: 0, gol: 0
-      });
-    }
-    const r = perGiocatore.get(p.id);
+  // Riepilogo: parto da tutti i giocatori selezionati, così chi non ha giocato
+  // resta nell'elenco invece di sparire.
+  const riepilogo = new Map();
+  giocatoriSel.forEach(p => {
+    riepilogo.set(p.id, {
+      cognome: p.cognome || "", nome: p.nome || "", squadra: p.squadra || "",
+      partite: 0, titolare: 0, subentrato: 0, panchina: 0, nonConvocato: 0,
+      minuti: 0, gol: 0, minutiSettimana: {}
+    });
+  });
+  righeSel.forEach(({ player: p, m, settimana }) => {
+    const r = riepilogo.get(p.id);
+    if (!r) return;
     r.partite++;
     if (m.presenza === "Titolare") r.titolare++;
     else if (m.presenza === "Subentrato") r.subentrato++;
     else if (m.presenza === "Panchina (non entrato)") r.panchina++;
     else if (m.presenza === "Non convocato") r.nonConvocato++;
-    r.minuti += minutiDi(m) || 0;
+    const min = minutiDi(m) || 0;
+    r.minuti += min;
     r.gol += Number(m.gol) || 0;
+    r.minutiSettimana[settimana] = (r.minutiSettimana[settimana] || 0) + min;
   });
+
   const intestazioneRiepilogo = ["Cognome", "Nome", "Squadra", "Partite", "Titolare",
-    "Subentrato", "Panchina", "Non convocato", "Minuti totali", "Gol"];
-  const righeRiepilogo = [...perGiocatore.values()]
-    .sort((a, b) => b.minuti - a.minuti || `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`))
+    "Subentrato", "Panchina", "Non convocato", "Minuti totali", "Gol",
+    ...keysOrdinate.map(k => `Min. ${etichettaSettimana[k]}`)];
+  const righeRiepilogo = [...riepilogo.values()]
+    // A parità di minuti conta chi ha comunque fatto parte del gruppo: chi è
+    // stato almeno in panchina sta sopra a chi non è stato proprio convocato.
+    .sort((a, b) => b.minuti - a.minuti || b.gol - a.gol || b.partite - a.partite ||
+      `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`))
     .map(r => [r.cognome, r.nome, r.squadra, r.partite, r.titolare, r.subentrato,
-      r.panchina, r.nonConvocato, r.minuti, r.gol]);
+      r.panchina, r.nonConvocato, r.minuti, r.gol,
+      ...keysOrdinate.map(k => r.minutiSettimana[k] || 0)]);
 
   const wb = XLSX.utils.book_new();
   const wsPartite = XLSX.utils.aoa_to_sheet([intestazionePartite, ...righePartite]);
   wsPartite["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 16 }, { wch: 24 },
     { wch: 24 }, { wch: 10 }, { wch: 24 }, { wch: 22 }, { wch: 8 }, { wch: 6 }, { wch: 22 }, { wch: 50 }];
   XLSX.utils.book_append_sheet(wb, wsPartite, "Partite");
+
   const wsRiepilogo = XLSX.utils.aoa_to_sheet([intestazioneRiepilogo, ...righeRiepilogo]);
-  wsRiepilogo["!cols"] = intestazioneRiepilogo.map((_, i) => ({ wch: i < 3 ? 22 : 13 }));
+  wsRiepilogo["!cols"] = intestazioneRiepilogo.map((_, i) => ({ wch: i < 3 ? 22 : (i < 10 ? 13 : 22) }));
   XLSX.utils.book_append_sheet(wb, wsRiepilogo, "Riepilogo");
 
-  XLSX.writeFile(wb, `${sanitizeNomeFile("Presenze partite")} - ${formatDataFile(dataOggiLocale())}.xlsx`);
+  const nomeBase = keysOrdinate.length === 1
+    ? `Presenze ${etichettaSettimana[keysOrdinate[0]]}`
+    : `Presenze ${keysOrdinate.length} settimane`;
+  XLSX.writeFile(wb, `${sanitizeNomeFile(nomeBase)} - ${formatDataFile(dataOggiLocale())}.xlsx`);
 }
 
 function renderStrumenti(content) {
