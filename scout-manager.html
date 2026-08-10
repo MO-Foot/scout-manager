@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 01:20</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 03:00</div>
         </div>
       </div>
     </header>
@@ -5027,6 +5027,14 @@ function apriDettaglio(id) {
               ${p.nazionalita ? `<span class="tag">${p.nazionalita === "CH" ? "🇨🇭 CH" : `🇨🇭 CH + ${esc(p.nazionalita)}`}</span>` : ""}
             </div>
             ${etichette.length ? `<div class="card-etichette">${etichette.join("")}</div>` : ""}
+            ${(() => {
+              // Stato di convocazione ereditato dai raduni: mostrato con il colore
+              // ufficiale della legenda, così si capisce a colpo d'occhio se il
+              // giocatore è Kaderspieler, Pikett o altro, e in quale raduno.
+              const st = statiRadunoDiGiocatore(p.id);
+              if (!st.length) return "";
+              return `<div class="card-etichette">` + st.map(s => `<span class="tag" style="background:${esc(s.legenda ? s.legenda.colore : "#4a4a4a")}; color:${esc(s.legenda ? s.legenda.testo : "#fff")};" title="${esc(s.radunoNome)}">${esc(s.legenda ? s.legenda.nome : s.stato)} · ${esc(s.radunoNome)}</span>`).join("") + `</div>`;
+            })()}
           </div>
           <div class="card-badge large ${ratingClass(media)}">${media !== null ? media.toFixed(1) : "-"}</div>
           <div class="modal-radar">${radarChartSVG(medieTips(p, filtroScouts), { size: 108, showLabels: true })}</div>
@@ -7781,6 +7789,95 @@ function renderPresenze(content) {
   });
 }
 
+// Lo stato di convocazione (Kaderspieler, Pikett, Nachnominiert...) non è un
+// campo del giocatore: vive dentro la rosa di ogni raduno. Le voci "Rosa
+// Nazionale ..." sono il bacino completo e non hanno stato, mentre i raduni
+// veri e propri contengono la selezione. Queste due funzioni fanno scendere lo
+// stato dal raduno al giocatore, così lo si può mostrare nella scheda e usarlo
+// per colorare gli export senza doverlo riscrivere a mano.
+function statiRadunoDiGiocatore(giocatoreId) {
+  const out = [];
+  (raduni || []).forEach(r => {
+    const voce = (r.rosa || []).find(v => v.giocatoreId === giocatoreId && v.stato);
+    if (voce) out.push({ radunoId: r.id, radunoNome: r.nome || "Raduno", stato: voce.stato, legenda: statoLegenda(voce.stato) });
+  });
+  return out;
+}
+function statoRadunoDiGiocatore(giocatoreId, radunoId) {
+  const r = (raduni || []).find(x => x.id === radunoId);
+  if (!r) return null;
+  const voce = (r.rosa || []).find(v => v.giocatoreId === giocatoreId && v.stato);
+  return voce ? voce.stato : null;
+}
+// I soli raduni che hanno almeno un giocatore con uno stato: sono gli unici
+// utilizzabili come sorgente dei colori (le "Rosa" generali non lo sono).
+function raduniConStati() {
+  return (raduni || []).filter(r => (r.rosa || []).some(v => v.stato));
+}
+
+// Ordine posizionale dei ruoli, usato per il report presenze: dal portiere
+// all'attaccante e, dentro ogni linea, da destra a sinistra come sulla lavagna.
+// I ruoli nel database sono scritti in modo libero e in tre lingue (arrivano
+// anche dalle formazioni importate dal MatchCenter), quindi classificaRuolo()
+// li riconduce a una di queste caselle.
+// Ordine posizionale: dal portiere all'attaccante, e dentro ogni linea da
+// destra a sinistra, come sulla lavagna.
+const ORDINE_RUOLI = [
+  "Portiere",
+  "Difensore esterno destro", "Difensore centrale destro", "Difensore centrale",
+  "Difensore centrale sinistro", "Difensore esterno sinistro",
+  "Mediano / centrocampista difensivo", "Centrocampista centrale",
+  "Interno / mezzala destra", "Interno / mezzala sinistra",
+  "Trequartista / punta di sostegno",
+  "Ala destra", "Ala sinistra",
+  "Seconda punta", "Attaccante centrale",
+  "Ruolo non indicato"
+];
+
+function classificaRuolo(ruolo) {
+  const r = (ruolo || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (!r.trim()) return "Ruolo non indicato";
+
+  const destro   = /destr|rechts|droit|\bdx\b/.test(r) && !/rechtsinnen|droit interieur/.test(r) || /rechtsinnen|droit interieur/.test(r);
+  const lato = /destr|rechts|droit|\bdx\b/.test(r) ? "D"
+             : /sinistr|links|gauche|\bsx\b/.test(r) ? "S" : "C";
+
+  if (/portier|torwart|gardien|\btor\b/.test(r)) return "Portiere";
+
+  // Attaccanti e punte
+  if (/st?ostegno|trequartist|hangende|playmaker|pointe de soutien/.test(r)) return "Trequartista / punta di sostegno";
+  if (/seconda punta/.test(r)) return "Seconda punta";
+  if (/punta|attacc|centravanti|sturm|spitze|attaque|buteur/.test(r)) {
+    if (/ala|flugel|aile|esterno alto/.test(r)) return lato === "S" ? "Ala sinistra" : "Ala destra";
+    return "Attaccante centrale";
+  }
+  // Ali ed esterni offensivi. "aussen" in un ruolo di centrocampo vuol dire
+  // esterno d'attacco (Mittelfeld rechtsaussen), non mezzala.
+  if (/\bala\b|flugel|\baile\b|esterno alto|esterno offensiv|wing/.test(r) || (/aussen/.test(r) && /mittelfeld|centrocamp/.test(r)))
+    return lato === "S" ? "Ala sinistra" : "Ala destra";
+
+  // Centrocampo
+  if (/median|regista|defensiv|difensivo|\bdemi\b.*defensif|sechser/.test(r) && /median|regista|defensiv|difensivo|demi/.test(r))
+    return "Mediano / centrocampista difensivo";
+  if (/mezzala|interno|innen|interieur|esterno medio|centrocampo destr|centrocampo sinistr|mittelfeld rechts|mittelfeld links/.test(r))
+    return lato === "S" ? "Interno / mezzala sinistra" : (lato === "D" ? "Interno / mezzala destra" : "Centrocampista centrale");
+  if (/centrocamp|mittelfeld|\bdemi\b|milieu/.test(r)) {
+    if (lato === "D") return "Interno / mezzala destra";
+    if (lato === "S") return "Interno / mezzala sinistra";
+    return "Centrocampista centrale";
+  }
+
+  // Difesa
+  if (/difes|difensor|terzino|verteidig|defense|laterale|esterno basso|esterno sinistro|esterno destro/.test(r)) {
+    const esterno = /terzino|laterale|esterno|aussen|lateral/.test(r);
+    if (esterno) return lato === "S" ? "Difensore esterno sinistro" : "Difensore esterno destro";
+    if (lato === "D") return "Difensore centrale destro";
+    if (lato === "S") return "Difensore centrale sinistro";
+    return "Difensore centrale";
+  }
+  return "Ruolo non indicato";
+}
+
 // Finestra di scelta per il report delle presenze: quali giocatori (tutti o
 // per etichetta) e quali settimane (anche più di una, non per forza
 // consecutive). La selezione la fa tutta questa finestra: i filtri di ricerca
@@ -7818,6 +7915,9 @@ function apriModalReportPresenze() {
   // normale (il report del weekend appena passato). Le altre si aggiungono con
   // un clic, o tutte insieme col pulsante "Tutte".
   const settimanaPiuRecente = settimaneOrdinate[0][0];
+  // Come sorgente dei colori propongo l ultimo raduno che ha una selezione.
+  const listaRaduniStati = raduniConStati();
+  const radunoPredefinito = listaRaduniStati.length ? listaRaduniStati[listaRaduniStati.length - 1].id : "";
 
   root.innerHTML = `
     <div class="modal-overlay" id="modal-overlay-report-presenze">
@@ -7856,6 +7956,26 @@ function apriModalReportPresenze() {
                 ${esc(formatRangeSettimana(sett.lunedi, sett.domenica))} (${sett.righe.length})
               </label>`).join("")}
           </div>
+        </div>
+
+        <div class="import-subsection">
+          <h3>Colori per stato di convocazione</h3>
+          <div class="import-controls">
+            <select id="rp-raduno" class="f-input">
+              <option value="">Nessun colore</option>
+              ${raduniConStati().map(r => `<option value="${esc(r.id)}" ${r.id === radunoPredefinito ? "selected" : ""}>${esc(r.nome || "Raduno")}</option>`).join("")}
+            </select>
+          </div>
+          <p class="muted" style="margin:6px 0 0;">Scegliendo un raduno, il foglio Riepilogo prende una colonna <strong>Stato</strong> e ogni riga viene colorata con i colori ufficiali: rosso per i Kaderspieler, giallo per i Pikett. Chi non è nella selezione di quel raduno resta bianco e segnato come non convocato.</p>
+        </div>
+
+        <div class="import-subsection">
+          <h3>Ordine del foglio Riepilogo</h3>
+          <div class="import-controls">
+            <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="rp-ordine" value="minuti" checked> Per minuti giocati — chi ha giocato di più in cima</label>
+            <label style="display:flex; align-items:center; gap:6px;"><input type="radio" name="rp-ordine" value="ruolo"> Per ruolo — dal portiere all'attaccante</label>
+          </div>
+          <p class="muted" style="margin:6px 0 0;">Scegliendo il ruolo, dentro ogni reparto i giocatori restano ordinati per minuti. Il foglio Partite non cambia: resta per settimana e minuti.</p>
         </div>
 
         <p class="muted" id="rp-conteggio" style="margin-top:4px;"></p>
@@ -7910,7 +8030,9 @@ function apriModalReportPresenze() {
     const keys = settimaneSelezionate();
     if (!g.length) { alert("Nessun giocatore selezionato — spunta almeno un'etichetta, oppure scegli \"Tutti i giocatori\"."); return; }
     if (!keys.length) { alert("Nessuna settimana selezionata — spuntane almeno una."); return; }
-    esportaReportPresenze(g, keys, settimaneMap);
+    const ordine = document.querySelector('input[name="rp-ordine"]:checked').value;
+    const radunoId = document.getElementById("rp-raduno").value;
+    esportaReportPresenze(g, keys, settimaneMap, ordine, radunoId);
     root.innerHTML = "";
   };
 
@@ -7927,7 +8049,7 @@ function apriModalReportPresenze() {
 //               totali del periodo e in più una colonna di minuti per ogni
 //               settimana scelta. I giocatori senza partite nel periodo ci sono
 //               lo stesso, con gli zeri: sono quelli che interessa vedere.
-function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap) {
+function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap, ordine, radunoId) {
   if (!giocatoriSel || !giocatoriSel.length) { alert("Nessun giocatore selezionato."); return; }
   if (!settimaneKeys || !settimaneKeys.length) { alert("Nessuna settimana selezionata."); return; }
 
@@ -7973,6 +8095,8 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap) {
   giocatoriSel.forEach(p => {
     riepilogo.set(p.id, {
       cognome: p.cognome || "", nome: p.nome || "", squadra: p.squadra || "",
+      ruolo: p.ruoloPrimario || "", reparto: classificaRuolo(p.ruoloPrimario),
+      stato: radunoId ? statoRadunoDiGiocatore(p.id, radunoId) : null,
       partite: 0, titolare: 0, subentrato: 0, panchina: 0, nonConvocato: 0,
       minuti: 0, gol: 0, minutiSettimana: {}
     });
@@ -7991,15 +8115,21 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap) {
     r.minutiSettimana[settimana] = (r.minutiSettimana[settimana] || 0) + min;
   });
 
-  const intestazioneRiepilogo = ["Cognome", "Nome", "Squadra", "Partite", "Titolare",
+  const intestazioneRiepilogo = ["Cognome", "Nome", "Squadra", ...(radunoId ? ["Stato"] : []), "Reparto", "Ruolo", "Partite", "Titolare",
     "Subentrato", "Panchina", "Non convocato", "Minuti totali", "Gol",
     ...keysOrdinate.map(k => `Min. ${etichettaSettimana[k]}`)];
+  // A parità di minuti conta chi ha comunque fatto parte del gruppo: chi è
+  // stato almeno in panchina sta sopra a chi non è stato proprio convocato.
+  const perMinuti = (a, b) => b.minuti - a.minuti || b.gol - a.gol || b.partite - a.partite ||
+    `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`);
+  // Con l'ordine per ruolo il reparto viene prima di tutto, ma dentro il
+  // reparto vale sempre il criterio dei minuti.
+  const perRuolo = (a, b) => (ORDINE_RUOLI.indexOf(a.reparto) - ORDINE_RUOLI.indexOf(b.reparto)) || perMinuti(a, b);
   const righeRiepilogo = [...riepilogo.values()]
-    // A parità di minuti conta chi ha comunque fatto parte del gruppo: chi è
-    // stato almeno in panchina sta sopra a chi non è stato proprio convocato.
-    .sort((a, b) => b.minuti - a.minuti || b.gol - a.gol || b.partite - a.partite ||
-      `${a.cognome} ${a.nome}`.localeCompare(`${b.cognome} ${b.nome}`))
-    .map(r => [r.cognome, r.nome, r.squadra, r.partite, r.titolare, r.subentrato,
+    .sort(ordine === "ruolo" ? perRuolo : perMinuti)
+    .map(r => [r.cognome, r.nome, r.squadra,
+      ...(radunoId ? [r.stato ? (statoLegenda(r.stato)?.nome || r.stato) : "Non convocato"] : []),
+      r.reparto, r.ruolo, r.partite, r.titolare, r.subentrato,
       r.panchina, r.nonConvocato, r.minuti, r.gol,
       ...keysOrdinate.map(k => r.minutiSettimana[k] || 0)]);
 
@@ -8010,13 +8140,61 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap) {
   XLSX.utils.book_append_sheet(wb, wsPartite, "Partite");
 
   const wsRiepilogo = XLSX.utils.aoa_to_sheet([intestazioneRiepilogo, ...righeRiepilogo]);
-  wsRiepilogo["!cols"] = intestazioneRiepilogo.map((_, i) => ({ wch: i < 3 ? 22 : (i < 10 ? 13 : 22) }));
+  wsRiepilogo["!cols"] = intestazioneRiepilogo.map((_, i) => ({ wch: i < 3 ? 22 : (i === 3 ? 30 : (i === 4 ? 26 : (i < 12 ? 13 : 22))) }));
   XLSX.utils.book_append_sheet(wb, wsRiepilogo, "Riepilogo");
 
   const nomeBase = keysOrdinate.length === 1
     ? `Presenze ${etichettaSettimana[keysOrdinate[0]]}`
     : `Presenze ${keysOrdinate.length} settimane`;
-  XLSX.writeFile(wb, `${sanitizeNomeFile(nomeBase)} - ${formatDataFile(dataOggiLocale())}.xlsx`);
+  const nomeFile = `${sanitizeNomeFile(nomeBase)} - ${formatDataFile(dataOggiLocale())}.xlsx`;
+
+  // Senza raduno scelto basta SheetJS. Con i colori serve ExcelJS, perché
+  // SheetJS nella versione libera non sa scrivere il riempimento delle celle.
+  if (!radunoId) { XLSX.writeFile(wb, nomeFile); return; }
+  const coloriRighe = [...riepilogo.values()]
+    .sort(ordine === "ruolo" ? perRuolo : perMinuti)
+    .map(r => kaderlisteColoreStato(r.stato) || (r.stato ? "FF" + (statoLegenda(r.stato)?.colore || "#4a4a4a").replace("#", "").toUpperCase() : null));
+  const testiRighe = [...riepilogo.values()]
+    .sort(ordine === "ruolo" ? perRuolo : perMinuti)
+    .map(r => (statoLegenda(r.stato)?.testo || "#1a1a1a"));
+  scriviReportPresenzeColorato(nomeFile, intestazionePartite, righePartite,
+    intestazioneRiepilogo, righeRiepilogo, coloriRighe, testiRighe);
+}
+
+// Riscrive gli stessi due fogli con ExcelJS per poter colorare le righe del
+// Riepilogo con i colori ufficiali della legenda dei raduni (rosso
+// Kaderspieler, giallo Pikett, e così via).
+async function scriviReportPresenzeColorato(nomeFile, intPartite, righePartite, intRiep, righeRiep, coloriRighe, testiRighe) {
+  if (typeof ExcelJS === "undefined") {
+    alert("La libreria per l'esportazione colorata non è disponibile (file exceljs.min.js mancante, oppure sei offline al primo utilizzo). Scelgo \"Nessun colore\" e riprova per avere comunque il file.");
+    return;
+  }
+  const wb = new ExcelJS.Workbook();
+  const wsP = wb.addWorksheet("Partite");
+  wsP.addRow(intPartite).font = { bold: true };
+  righePartite.forEach(r => wsP.addRow(r));
+  wsP.columns = intPartite.map((_, i) => ({ width: i === 12 ? 50 : (i < 2 ? 20 : 18) }));
+  wsP.views = [{ state: "frozen", ySplit: 1 }];
+
+  const wsR = wb.addWorksheet("Riepilogo");
+  wsR.addRow(intRiep).font = { bold: true };
+  righeRiep.forEach((r, i) => {
+    const riga = wsR.addRow(r);
+    const colore = coloriRighe[i];
+    if (!colore) return;
+    riga.eachCell(cell => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colore } };
+      cell.font = { color: { argb: "FF" + (testiRighe[i] || "#1a1a1a").replace("#", "").toUpperCase() } };
+    });
+  });
+  wsR.columns = intRiep.map((_, i) => ({ width: i < 3 ? 22 : 15 }));
+  wsR.views = [{ state: "frozen", ySplit: 1 }];
+
+  const buf = await wb.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = nomeFile; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 function renderStrumenti(content) {
