@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 04:10</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 10:30</div>
         </div>
       </div>
     </header>
@@ -6317,7 +6317,13 @@ function parseCandidatiDocxTabella(html, scoutDefault, nomeFile) {
     const trovaColonnaEsatta = lettera => headerCells.findIndex(h => h === lettera);
 
     const colData = trovaColonna("data visionatura", "data della visionatura");
-    const colNome = trovaColonna("nome");
+    // "Cognome" contiene la sottostringa "nome": cercando col semplice
+    // includes(), la colonna Nome finiva per puntare a Cognome quando questa
+    // veniva prima nella tabella, e il giocatore usciva come "Rossi Rossi".
+    // Prima provo la corrispondenza esatta, poi ripiego escludendo "cognome".
+    const colNome = headerCells.indexOf("nome") >= 0
+      ? headerCells.indexOf("nome")
+      : headerCells.findIndex(x => x.includes("nome") && !x.includes("cognome"));
     const colCognome = trovaColonna("cognome");
     const colNascita = trovaColonna("data di nascita", "nascita");
     const colSquadra = trovaColonna("squadra");
