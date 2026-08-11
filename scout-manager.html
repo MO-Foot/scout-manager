@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 03:00</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 03:40</div>
         </div>
       </div>
     </header>
@@ -8072,6 +8072,13 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap, ordine
   righeSel.sort((a, b) => {
     const perSettimana = b.settimana.localeCompare(a.settimana);
     if (perSettimana) return perSettimana;
+    // Se ho scelto l'ordine per ruolo lo applico anche qui: altrimenti il
+    // foglio Partite sembrerebbe ignorare la scelta fatta nella finestra.
+    if (ordine === "ruolo") {
+      const perReparto = ORDINE_RUOLI.indexOf(classificaRuolo(a.player.ruoloPrimario)) -
+                         ORDINE_RUOLI.indexOf(classificaRuolo(b.player.ruoloPrimario));
+      if (perReparto) return perReparto;
+    }
     const minA = minutiDi(a.m) ?? -1, minB = minutiDi(b.m) ?? -1;
     if (minB !== minA) return minB - minA;
     return `${a.player.cognome} ${a.player.nome}`.localeCompare(`${b.player.cognome} ${b.player.nome}`);
@@ -8137,11 +8144,11 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap, ordine
   const wsPartite = XLSX.utils.aoa_to_sheet([intestazionePartite, ...righePartite]);
   wsPartite["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 16 }, { wch: 24 },
     { wch: 24 }, { wch: 10 }, { wch: 24 }, { wch: 22 }, { wch: 8 }, { wch: 6 }, { wch: 22 }, { wch: 50 }];
-  XLSX.utils.book_append_sheet(wb, wsPartite, "Partite");
-
   const wsRiepilogo = XLSX.utils.aoa_to_sheet([intestazioneRiepilogo, ...righeRiepilogo]);
   wsRiepilogo["!cols"] = intestazioneRiepilogo.map((_, i) => ({ wch: i < 3 ? 22 : (i === 3 ? 30 : (i === 4 ? 26 : (i < 12 ? 13 : 22))) }));
+  // Riepilogo per primo: è il foglio che si guarda a colpo d'occhio.
   XLSX.utils.book_append_sheet(wb, wsRiepilogo, "Riepilogo");
+  XLSX.utils.book_append_sheet(wb, wsPartite, "Partite");
 
   const nomeBase = keysOrdinate.length === 1
     ? `Presenze ${etichettaSettimana[keysOrdinate[0]]}`
@@ -8153,12 +8160,23 @@ function esportaReportPresenze(giocatoriSel, settimaneKeys, settimaneMap, ordine
   if (!radunoId) { XLSX.writeFile(wb, nomeFile); return; }
   const coloriRighe = [...riepilogo.values()]
     .sort(ordine === "ruolo" ? perRuolo : perMinuti)
-    .map(r => kaderlisteColoreStato(r.stato) || (r.stato ? "FF" + (statoLegenda(r.stato)?.colore || "#4a4a4a").replace("#", "").toUpperCase() : null));
+    .map(r => r.stato ? argbDaColore(statoLegenda(r.stato)?.colore, "#4a4a4a") : null);
   const testiRighe = [...riepilogo.values()]
     .sort(ordine === "ruolo" ? perRuolo : perMinuti)
     .map(r => (statoLegenda(r.stato)?.testo || "#1a1a1a"));
   scriviReportPresenzeColorato(nomeFile, intestazionePartite, righePartite,
     intestazioneRiepilogo, righeRiepilogo, coloriRighe, testiRighe);
+}
+
+// Converte un colore della legenda (#fff oppure #ffff00) nel formato ARGB a 8
+// cifre che ExcelJS pretende. La forma a 3 cifre va espansa: concatenandola
+// così com'è si ottiene un valore a 5 caratteri che Excel considera un file
+// danneggiato e "ripara" buttando via tutti i colori (bug trovato in prova).
+function argbDaColore(hex, fallback) {
+  let c = String(hex || fallback || "#000000").replace("#", "").trim();
+  if (c.length === 3) c = c.split("").map(x => x + x).join("");
+  if (!/^[0-9a-fA-F]{6}$/.test(c)) c = String(fallback || "#000000").replace("#", "");
+  return "FF" + c.toUpperCase();
 }
 
 // Riscrive gli stessi due fogli con ExcelJS per poter colorare le righe del
@@ -8170,12 +8188,7 @@ async function scriviReportPresenzeColorato(nomeFile, intPartite, righePartite, 
     return;
   }
   const wb = new ExcelJS.Workbook();
-  const wsP = wb.addWorksheet("Partite");
-  wsP.addRow(intPartite).font = { bold: true };
-  righePartite.forEach(r => wsP.addRow(r));
-  wsP.columns = intPartite.map((_, i) => ({ width: i === 12 ? 50 : (i < 2 ? 20 : 18) }));
-  wsP.views = [{ state: "frozen", ySplit: 1 }];
-
+  // Riepilogo per primo, come nella versione senza colori.
   const wsR = wb.addWorksheet("Riepilogo");
   wsR.addRow(intRiep).font = { bold: true };
   righeRiep.forEach((r, i) => {
@@ -8184,11 +8197,17 @@ async function scriviReportPresenzeColorato(nomeFile, intPartite, righePartite, 
     if (!colore) return;
     riga.eachCell(cell => {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colore } };
-      cell.font = { color: { argb: "FF" + (testiRighe[i] || "#1a1a1a").replace("#", "").toUpperCase() } };
+      cell.font = { color: { argb: argbDaColore(testiRighe[i], "#1a1a1a") } };
     });
   });
   wsR.columns = intRiep.map((_, i) => ({ width: i < 3 ? 22 : 15 }));
   wsR.views = [{ state: "frozen", ySplit: 1 }];
+
+  const wsP = wb.addWorksheet("Partite");
+  wsP.addRow(intPartite).font = { bold: true };
+  righePartite.forEach(r => wsP.addRow(r));
+  wsP.columns = intPartite.map((_, i) => ({ width: i === 12 ? 50 : (i < 2 ? 20 : 18) }));
+  wsP.views = [{ state: "frozen", ySplit: 1 }];
 
   const buf = await wb.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
