@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 03:40</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 04:10</div>
         </div>
       </div>
     </header>
@@ -7815,6 +7815,26 @@ function raduniConStati() {
   return (raduni || []).filter(r => (r.rosa || []).some(v => v.stato));
 }
 
+// Tutti i raduni utilizzabili come sorgente dei colori, dal più recente in giù.
+// La lista si ricostruisce ogni volta che si apre la finestra del report,
+// quindi i raduni creati in futuro (Raduno 4, Raduno 5...) compaiono da soli
+// senza bisogno di toccare il codice. Includo anche quelli che non hanno
+// ancora nessuno stato assegnato, marcandoli: così un raduno appena creato è
+// già selezionabile mentre lo si sta compilando.
+function raduniPerColori() {
+  return (raduni || []).map(r => ({
+    id: r.id,
+    nome: r.nome || "Raduno",
+    data: r.dataInizio || "",
+    conStato: (r.rosa || []).filter(v => v.stato).length
+  })).sort((a, b) => {
+    if (!a.data && !b.data) return a.nome.localeCompare(b.nome);
+    if (!a.data) return 1;
+    if (!b.data) return -1;
+    return b.data.localeCompare(a.data);
+  });
+}
+
 // Ordine posizionale dei ruoli, usato per il report presenze: dal portiere
 // all'attaccante e, dentro ogni linea, da destra a sinistra come sulla lavagna.
 // I ruoli nel database sono scritti in modo libero e in tre lingue (arrivano
@@ -7916,8 +7936,12 @@ function apriModalReportPresenze() {
   // un clic, o tutte insieme col pulsante "Tutte".
   const settimanaPiuRecente = settimaneOrdinate[0][0];
   // Come sorgente dei colori propongo l ultimo raduno che ha una selezione.
-  const listaRaduniStati = raduniConStati();
-  const radunoPredefinito = listaRaduniStati.length ? listaRaduniStati[listaRaduniStati.length - 1].id : "";
+  // Propongo il raduno con una selezione già fatta più vicino nel tempo: di
+  // norma è quello che si sta preparando.
+  const oggiIso = dataOggiLocale();
+  const conStati = raduniPerColori().filter(r => r.conStato);
+  const prossimi = conStati.filter(r => r.data && r.data >= oggiIso).sort((a, b) => a.data.localeCompare(b.data));
+  const radunoPredefinito = (prossimi[0] || conStati[0] || {}).id || "";
 
   root.innerHTML = `
     <div class="modal-overlay" id="modal-overlay-report-presenze">
@@ -7963,7 +7987,7 @@ function apriModalReportPresenze() {
           <div class="import-controls">
             <select id="rp-raduno" class="f-input">
               <option value="">Nessun colore</option>
-              ${raduniConStati().map(r => `<option value="${esc(r.id)}" ${r.id === radunoPredefinito ? "selected" : ""}>${esc(r.nome || "Raduno")}</option>`).join("")}
+              ${raduniPerColori().map(r => `<option value="${esc(r.id)}" ${r.id === radunoPredefinito ? "selected" : ""}>${esc(r.nome)}${r.data ? " — " + formatDataIt(r.data) : ""} · ${r.conStato ? r.conStato + " con stato" : "nessuno stato assegnato"}</option>`).join("")}
             </select>
           </div>
           <p class="muted" style="margin:6px 0 0;">Scegliendo un raduno, il foglio Riepilogo prende una colonna <strong>Stato</strong> e ogni riga viene colorata con i colori ufficiali: rosso per i Kaderspieler, giallo per i Pikett. Chi non è nella selezione di quel raduno resta bianco e segnato come non convocato.</p>
