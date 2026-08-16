@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 11/08/2026 · 10:30</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 16.08.2026 · 21:30</div>
         </div>
       </div>
     </header>
@@ -4649,6 +4649,79 @@ function valoreCampoReport(p, chiave) {
     case "note": return p.note || "";
     default: return "";
   }
+}
+
+// Dossier del raduno: un PDF con la scheda completa di ogni convocato, nello
+// stesso ordine dei reparti della lavagna (portieri, difensori, ecc.), così il
+// fascicolo segue la logica tattica invece dell'ordine alfabetico. Riusa il
+// generatore di schede già esistente (generaReportPDF), quindi eredita
+// impaginazione, foto e campi.
+function apriModalDossierRaduno(r) {
+  const root = document.getElementById("modal-root");
+  if (!root) return;
+  const conteggi = {};
+  (r.rosa || []).forEach(v => { const k = v.stato || "_nessuno"; conteggi[k] = (conteggi[k] || 0) + 1; });
+  const statiPresenti = RADUNO_LEGENDA.filter(s => conteggi[s.chiave]);
+
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay-dossier">
+      <div class="modal-box modal-box-wide">
+        <button class="modal-close no-print" id="modal-close-dossier" title="Chiudi">✕</button>
+        <h2>Dossier del raduno</h2>
+        <div class="import-subsection">
+          <h3>Chi includere</h3>
+          <div class="report-campi-grid">
+            ${statiPresenti.map(s => `
+              <label class="report-campo-check">
+                <input type="checkbox" class="dossier-stato" value="${esc(s.chiave)}" ${s.chiave === "kaderspieler" ? "checked" : ""}>
+                <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(s.colore)};margin-right:6px;"></span>${esc(s.nome)} (${conteggi[s.chiave]})
+              </label>`).join("")}
+            ${conteggi._nessuno ? `<label class="report-campo-check"><input type="checkbox" class="dossier-stato" value="_nessuno"> Senza stato (${conteggi._nessuno})</label>` : ""}
+          </div>
+        </div>
+        <div class="import-subsection">
+          <h3>Impaginazione</h3>
+          <div class="import-controls">
+            <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="dossier-perpagina" checked> Una pagina per giocatore</label>
+          </div>
+          <p class="muted" style="margin:6px 0 0;">Le schede escono nell'ordine dei reparti della lavagna. Senza "una pagina per giocatore" le schede si susseguono per non sprecare spazio.</p>
+        </div>
+        <p class="muted" id="dossier-conteggio" style="margin-top:4px;"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" id="dossier-genera">Genera dossier</button>
+        </div>
+      </div>
+    </div>`;
+
+  // Ordine dei reparti come sulla lavagna; a parità di reparto, ordine della rosa.
+  const ordineReparti = (REPARTI_GRID_PER_MODULO[r.modulo] || []).flat().map(x => x.id);
+  function selezionati() {
+    const stati = [...document.querySelectorAll(".dossier-stato:checked")].map(el => el.value);
+    if (!stati.length) return [];
+    return (r.rosa || [])
+      .filter(v => stati.includes(v.stato || "_nessuno"))
+      .slice()
+      .sort((a, b) => {
+        const ia = ordineReparti.indexOf(a.reparto), ib = ordineReparti.indexOf(b.reparto);
+        return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      })
+      .map(v => players.find(p => p.id === v.giocatoreId))
+      .filter(Boolean);
+  }
+  const aggiorna = () => {
+    document.getElementById("dossier-conteggio").innerHTML = `Il dossier conterrà <strong>${selezionati().length}</strong> schede.`;
+  };
+  document.querySelectorAll(".dossier-stato").forEach(el => el.onchange = aggiorna);
+  aggiorna();
+
+  document.getElementById("dossier-genera").onclick = () => {
+    const g = selezionati();
+    if (!g.length) { alert("Nessun giocatore selezionato — spunta almeno uno stato."); return; }
+    const unaPerPagina = document.getElementById("dossier-perpagina").checked;
+    generaReportPDF(g, REPORT_PRESET_COMPLETO, "scheda", unaPerPagina, `Dossier ${r.nome || "raduno"}`);
+  };
+  document.getElementById("modal-close-dossier").onclick = () => { root.innerHTML = ""; };
+  document.getElementById("modal-overlay-dossier").onclick = e => { if (e.target.id === "modal-overlay-dossier") root.innerHTML = ""; };
 }
 
 function apriModalReport() {
@@ -10132,6 +10205,7 @@ function renderRadunoDettaglio(content) {
           <button class="btn btn-ghost btn-sm" id="btn-allenamenti-raduno">Allenamenti${(r.allenamenti || []).length ? ` (${(r.allenamenti || []).length})` : ""}</button>
           <button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-dett">Esporta Lista</button>
           ${r.modulo === "1-4-4-2" ? `<button class="btn btn-ghost btn-sm" id="btn-esporta-raduno-ufficiale">Esporta Kaderliste ufficiale</button>` : ""}
+          <button class="btn btn-ghost btn-sm" id="btn-dossier-raduno" title="Genera un PDF con la scheda completa di ogni giocatore convocato, nell'ordine dei reparti della lavagna">Dossier PDF</button>
           <button class="btn btn-ghost btn-sm" id="btn-esporta-call-up" title="Esporta nel formato usato per le convocazioni ufficiali (Selected Players / On Call Players)">Esporta Call Up</button>
           <button class="btn btn-ghost btn-sm" id="btn-duplica-raduno" title="Crea un nuovo raduno con le date da compilare, partendo dagli stessi giocatori di questa rosa">Duplica in nuovo raduno</button>
           <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
@@ -10247,6 +10321,7 @@ function renderRadunoDettaglio(content) {
     };
   }
 
+  document.getElementById("btn-dossier-raduno").onclick = () => apriModalDossierRaduno(r);
   document.getElementById("btn-esporta-call-up").onclick = () => {
     const esito = esportaCallUp(r);
     if (!esito.selezionati && !esito.picchetto) {
@@ -10544,7 +10619,21 @@ function kaderlisteApplicaTint(hex, tint) {
 // non potendoli distinguere dal colore, in import scegliamo di default
 // "verletzt" — se un giocatore è invece "Abgesagt" va corretto a mano dal
 // menu che compare nella schermata di verifica import.
-const KADERLISTE_COLORE_A_STATO = { "FF0000": "kaderspieler", "FFFF00": "pikett", "FFC000": "nachnominiert", "BFBFBF": "verletzt", "4EA72E": "sichtungklub" };
+const KADERLISTE_COLORE_A_STATO = {
+  "FF0000": "kaderspieler", "FFFF00": "pikett", "FFC000": "nachnominiert",
+  "BFBFBF": "verletzt", "4EA72E": "sichtungklub",
+  // Colori del modello ufficiale della Federazione, che non coincidono tutti
+  // con quelli scritti da esportaKaderlisteUfficiale. Nel modello federale i
+  // grigi arrivano dai "colori a tema" di Excel: A6A6A6 è il bianco tema 0
+  // scurito (Verletzt) e 595959 il nero tema 1 schiarito (Sonstiges). Senza
+  // queste voci l'import segnalava "colore non riconosciuto" e lasciava i
+  // giocatori senza stato.
+  "A6A6A6": "verletzt", "595959": "sonstiges",
+  // Nella LEGENDE federale il rosso pieno è STAMMSPIELER e il salmone è
+  // KADERSPIELER; l'app non distingue i due casi e li tratta entrambi come
+  // giocatori convocati.
+  "FF7C80": "kaderspieler"
+};
 // Legge il colore di riempimento della cella (riga/colonna 0-based, formato
 // SheetJS) e prova a farlo corrispondere a uno stato noto. Richiede che il
 // workbook sia stato letto con {cellStyles:true} (vedi avviaImportRaduno),
