@@ -1422,7 +1422,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 16.08.2026 · 21:30</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 18.08.2026 · 09:20</div>
         </div>
       </div>
     </header>
@@ -1519,6 +1519,14 @@ function etichetteDaFilename(nomeFile) {
   const nome = nomeFile || "";
   const trovate = [];
   if (/FOOTURO/i.test(nome)) trovate.push("Candidato FOOTURO");
+  // Liste di convocazione di un singolo raduno (nomi tipo "Raduno 1 U17" o
+  // "Raduno 2 U18"): l'etichetta segue il raduno e non la nazionale generica,
+  // cosi resta chiaro a quale convocazione si riferisce. Va controllata prima
+  // della mappa qui sotto, altrimenti "U17" farebbe scattare la regola
+  // generica "Nazionale U17". Il numero arriva dal nome del file, quindi vale
+  // anche per i raduni successivi senza toccare il codice.
+  const mRaduno = nome.match(/Raduno[\s_-]*(\d+)[\s_-]*U-?(\d{2})/i);
+  if (mRaduno) { trovate.push(`Raduno ${mRaduno[1]} U${mRaduno[2]}`); return trovate; }
   for (const m of MAPPA_ETICHETTE_FILENAME) {
     if (m.re.test(nome)) { trovate.push(m.etichetta); break; }
   }
