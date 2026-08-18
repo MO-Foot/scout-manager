@@ -1008,6 +1008,15 @@ details[open] > .mirwald-summary::before{ content: "▾ "; }
 .qg-add-parametro{ margin: 2px 0 10px; }
 .qg-nota-label{ display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); }
 .qg-nota-label textarea{ font-family: var(--font-body); background: var(--surface); border: 1px solid var(--line); color: var(--chalk); padding: 9px 10px; border-radius: 6px; font-size: 13.5px; resize: vertical; }
+.qg-potenziale-asf{ margin: 4px 0 10px; }
+.qg-potenziale-asf summary{ cursor: pointer; font-size: 12.5px; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; }
+.qg-potenziale-asf summary::-webkit-details-marker{ display: none; }
+.qg-potenziale-asf summary::before{ content: "▸ "; font-size: 11px; }
+.qg-potenziale-asf[open] summary::before{ content: "▾ "; }
+.qg-potenziale-body{ margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
+.qg-potenziale-domanda{ display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--chalk); cursor: pointer; }
+.qg-potenziale-domanda input{ margin-top: 3px; flex-shrink: 0; }
+.qg-potenziale-badge{ font-family: var(--font-mono); padding: 1px 8px; border: 1px dashed var(--line); border-radius: 20px; font-size: 11.5px; }
 .btn-remove-row{
   background: none; border: 1px solid var(--line); color: var(--muted);
   border-radius: 6px; cursor: pointer; height: 32px;
@@ -1421,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 18/08/2026 · 23:39</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 18/08/2026 · 23:56</div>
         </div>
       </div>
     </header>
@@ -2735,107 +2744,169 @@ function graficoMirwaldSVG(player, { width = 560, height = 240 } = {}) {
     </div>`;
 }
 
-// Serie storica delle medie TIPS: raggruppa le valutazioni per data di
-// visionatura (media fra gli scout che hanno valutato quella data, se più
-// di uno) così da ottenere un punto per ogni sessione di osservazione.
-function serieTipsPerData(player, scoutFilter) {
-  let voci = (player.valutazioni || []).filter(v => v.data && PARAM_CANONICI_TIPS.includes(v.parametro));
+// Le 6 domande della checklist ASF per la "Valutazione del potenziale":
+// 2 spuntate = C, 3-4 = B, 5-6 = A. L'app usa questo elenco sia per la
+// checklist nel form di modifica sia come riferimento testuale.
+const DOMANDE_POTENZIALE_ASF = [
+  "Ha una qualità superiore alla media in uno o più degli ambiti TE-TA-CO?",
+  "È un (a) competitore (-trice)? Cerca di vincere tutte le partite + tutti i duelli?",
+  "Mostra carattere (linguaggio del corpo, dà energia, leadership)?",
+  "Ha una buona velocità (è rapido (a) o pensa velocemente)?",
+  "Ha una forte volontà (non si arrende mai, non perde mai il coraggio, grinta)?",
+  "Ha un buon equilibrio psicologico (gestione delle emozioni)?"
+];
+
+// Converte il numero di domande spuntate nel voto lettera ASF. Sotto le 2
+// spuntate non c'è un voto definito nella scala ASF: restituiamo stringa
+// vuota, così il chiamante sa che non deve ancora assegnare un potenziale.
+function letteraPotenzialeDaConteggio(count) {
+  if (count >= 5) return "A";
+  if (count >= 3) return "B";
+  if (count === 2) return "C";
+  return "";
+}
+
+// Colore di stato (verde/giallo/rosso, già usati in tutta l'app per i
+// rating) associato alla lettera iniziale di un voto potenziale, a
+// prescindere da eventuali suffissi "+"/"-".
+function coloreLetteraPotenziale(valore) {
+  const l = String(valore || "").trim().charAt(0).toUpperCase();
+  if (l === "A") return "var(--good)";
+  if (l === "B") return "var(--mid)";
+  if (l === "C") return "var(--low)";
+  return "var(--muted)";
+}
+function classeLetteraPotenziale(valore) {
+  const l = String(valore || "").trim().charAt(0).toUpperCase();
+  if (l === "A") return "rating-good";
+  if (l === "B") return "rating-mid";
+  if (l === "C") return "rating-low";
+  return "rating-na";
+}
+
+// Serie storica "Potenziale × media TIPS": un punto per ogni visionatura
+// che ha ENTRAMBI gli assi disponibili (un voto Potenziale A/B/C e almeno
+// un valore TIPS quel giorno). Se più scout valutano nella stessa data,
+// la media TIPS viene fatta fra loro (come per il resto dell'app) mentre
+// per il voto Potenziale si tiene l'ultimo trovato in ordine di inserimento.
+function serieMatricePotenziale(player, scoutFilter) {
+  let voci = (player.valutazioni || []).filter(v => v.data);
   if (scoutFilter && scoutFilter.size > 0) voci = voci.filter(v => v.scout && scoutFilter.has(v.scout));
   const perData = {};
   voci.forEach(v => {
-    const n = parseFloat(v.valoreNumerico);
-    if (isNaN(n)) return;
-    if (!perData[v.data]) perData[v.data] = {};
-    if (!perData[v.data][v.parametro]) perData[v.data][v.parametro] = [];
-    perData[v.data][v.parametro].push(n);
+    if (!perData[v.data]) perData[v.data] = { tips: {}, potenziale: null };
+    if (PARAM_CANONICI_TIPS.includes(v.parametro)) {
+      const n = parseFloat(v.valoreNumerico);
+      if (!isNaN(n)) {
+        if (!perData[v.data].tips[v.parametro]) perData[v.data].tips[v.parametro] = [];
+        perData[v.data].tips[v.parametro].push(n);
+      }
+    } else if (v.parametro === "Potenziale" && v.valoreNumerico) {
+      perData[v.data].potenziale = v.valoreNumerico;
+    }
   });
-  return Object.keys(perData).sort().map(data => {
-    const valori = {};
-    PARAM_CANONICI_TIPS.forEach(p => {
-      const vals = perData[data][p];
-      valori[p] = vals && vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    });
-    return { data, valori };
+  const risultato = [];
+  Object.keys(perData).sort().forEach(data => {
+    const d = perData[data];
+    if (!d.potenziale) return;
+    const lettera = String(d.potenziale).trim().charAt(0).toUpperCase();
+    if (lettera !== "A" && lettera !== "B" && lettera !== "C") return;
+    const suffisso = String(d.potenziale).trim().slice(1);
+    const mediePerParam = PARAM_CANONICI_TIPS
+      .map(p => { const vals = d.tips[p]; return vals && vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null; })
+      .filter(v => v !== null);
+    if (!mediePerParam.length) return;
+    const tipsMedia = mediePerParam.reduce((a, b) => a + b, 0) / mediePerParam.length;
+    risultato.push({ data, tipsMedia, lettera, suffisso, valoreGrezzo: d.potenziale });
   });
+  return risultato;
 }
 
-// Colori validati (dataviz skill, node scripts/validate_palette.js --mode dark
-// --surface #0d1712): partono dalle tonalità già in uso nell'app (oro/blu/verde/
-// rosso) ma spostati q.b. per garantire la separazione minima CVD e di contrasto.
-const EVOLUZIONE_TIPS_COLORI = {
-  "Tecnica": "#b8842a",
-  "Intelligenza": "#4a90c9",
-  "Personalità": "#3fa868",
-  "Speed": "#c1554a"
-};
-
-// Grafico a linee dell'evoluzione delle 4 componenti TIPS nel tempo, una
-// visionatura (o gruppo di visionature sulla stessa data) alla volta.
-function graficoEvoluzioneTipsSVG(player, { width = 560, height = 260, scoutFilter } = {}) {
-  const serie = serieTipsPerData(player, scoutFilter);
+// Grafico "a matrice": asse X = media TIPS (0-5), asse Y = potenziale
+// (3 fasce fisse A/B/C, A in alto), con una traiettoria che collega tutte
+// le visionature nel tempo e una freccia sull'ultimo tratto per far
+// risaltare la direzione più recente.
+function graficoMatricePotenzialeSVG(player, { width = 560, height = 280, scoutFilter } = {}) {
+  const serie = serieMatricePotenziale(player, scoutFilter).sort((a, b) => (a.data || "").localeCompare(b.data || ""));
   if (serie.length < 2) {
-    return `<p class="muted">Servono almeno due visionature con valori TIPS${scoutFilter && scoutFilter.size > 0 ? " (con il filtro scout attuale)" : ""} per mostrare un'evoluzione nel tempo.</p>`;
+    return `<p class="muted">Servono almeno due visionature con sia un voto Potenziale (A/B/C) sia valori TIPS${scoutFilter && scoutFilter.size > 0 ? " (con il filtro scout attuale)" : ""} per mostrare la traiettoria.</p>`;
   }
 
-  const padL = 32, padR = 54, padT = 16, padB = 32;
+  const padL = 34, padR = 20, padT = 16, padB = 32;
   const plotW = width - padL - padR, plotH = height - padT - padB;
 
-  const date = serie.map(s => new Date(s.data).getTime());
-  const minData = Math.min(...date), maxData = Math.max(...date);
-  const rangeData = Math.max(maxData - minData, 1);
+  const xFor = v => padL + (v / RADAR_SCALE_MAX) * plotW;
+  const bandH = plotH / 3;
+  const RIGA = { A: 0, B: 1, C: 2 };
+  const yForLettera = (lettera, suffisso) => {
+    let centro = padT + bandH * (RIGA[lettera] + 0.5);
+    if (suffisso === "+") centro -= bandH * 0.22;
+    else if (suffisso === "-") centro += bandH * 0.22;
+    return centro;
+  };
 
-  const minY = 0, maxY = RADAR_SCALE_MAX, rangeY = maxY - minY;
-
-  const xFor = t => padL + ((t - minData) / rangeData) * plotW;
-  const yFor = v => padT + plotH - ((v - minY) / rangeY) * plotH;
-
-  // griglia orizzontale + etichette asse Y (scala 0-5, fissa come il radar)
-  let griglia = "";
-  for (let v = minY; v <= maxY; v += 1) {
-    const y = yFor(v);
-    griglia += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1" opacity="0.35" />`;
-    griglia += `<text x="${padL - 8}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${v}</text>`;
+  // fasce di sfondo colorate (tenui) per A/B/C con etichetta di riga
+  let fasce = "";
+  [["A", "var(--good)"], ["B", "var(--mid)"], ["C", "var(--low)"]].forEach(([lettera, colore], riga) => {
+    const y = padT + bandH * riga;
+    fasce += `<rect x="${padL}" y="${y.toFixed(1)}" width="${plotW.toFixed(1)}" height="${bandH.toFixed(1)}" fill="${colore}" opacity="0.07" />`;
+    fasce += `<text x="${(padL - 8).toFixed(1)}" y="${(y + bandH / 2).toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-family="var(--font-mono)" font-size="11" font-weight="700" fill="${colore}">${lettera}</text>`;
+  });
+  let separatori = "";
+  for (let riga = 1; riga <= 2; riga++) {
+    const y = padT + bandH * riga;
+    separatori += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1" opacity="0.4" />`;
   }
 
-  // etichette asse X (data di ogni visionatura)
-  let etichetteX = "";
-  serie.forEach(s => {
-    const x = xFor(new Date(s.data).getTime());
-    etichetteX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${formatDataIt(s.data).slice(0, 5)}</text>`;
-  });
+  // griglia verticale + etichette asse X (media TIPS, scala 0-5 fissa)
+  let grigliaX = "";
+  for (let v = 0; v <= RADAR_SCALE_MAX; v += 1) {
+    const x = xFor(v);
+    grigliaX += `<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1" opacity="0.25" />`;
+    grigliaX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${v}</text>`;
+  }
+  const etichettaAsseX = `<text x="${(padL + plotW / 2).toFixed(1)}" y="${height - 4}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">Media TIPS</text>`;
 
-  // una linea + punti per componente, con etichetta diretta a fine linea
-  // (obbligatoria a 4 serie secondo la skill dataviz) oltre alla legenda sotto.
-  let linee = "", cerchi = "", labelFine = "";
-  PARAM_CANONICI_TIPS.forEach(param => {
-    const colore = EVOLUZIONE_TIPS_COLORI[param];
-    const punti = serie
-      .map((s, i) => ({ x: xFor(date[i]), y: s.valori[param] !== null ? yFor(s.valori[param]) : null, v: s.valori[param], data: s.data }))
-      .filter(p => p.y !== null);
-    if (punti.length >= 2) {
-      linee += `<polyline points="${punti.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="${colore}" stroke-width="2" />`;
-    }
-    punti.forEach(p => {
-      cerchi += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${colore}" stroke="var(--bg)" stroke-width="1.5"><title>${esc(param)}: ${p.v.toFixed(1)} (${formatDataIt(p.data)})</title></circle>`;
-    });
-    if (punti.length) {
-      const ultimo = punti[punti.length - 1];
-      labelFine += `<text x="${(ultimo.x + 7).toFixed(1)}" y="${ultimo.y.toFixed(1)}" dominant-baseline="middle" font-family="var(--font-mono)" font-size="10" font-weight="700" fill="${colore}">${RADAR_ABBREV[param]}</text>`;
-    }
+  const punti = serie.map(s => ({ ...s, x: xFor(s.tipsMedia), y: yForLettera(s.lettera, s.suffisso) }));
+
+  const traiettoria = `<polyline points="${punti.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" />`;
+
+  // freccia sull'ultimo tratto: rende immediatamente leggibile la
+  // direzione più recente, non solo la forma storica della traiettoria.
+  let freccia = "";
+  const a = punti[punti.length - 2], b = punti[punti.length - 1];
+  if (Math.abs(b.x - a.x) > 0.01 || Math.abs(b.y - a.y) > 0.01) {
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const lung = 9;
+    const p1x = b.x - lung * Math.cos(ang - Math.PI / 7), p1y = b.y - lung * Math.sin(ang - Math.PI / 7);
+    const p2x = b.x - lung * Math.cos(ang + Math.PI / 7), p2y = b.y - lung * Math.sin(ang + Math.PI / 7);
+    freccia = `<polygon points="${b.x.toFixed(1)},${b.y.toFixed(1)} ${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)}" fill="var(--gold)" />`;
+  }
+
+  let cerchi = "";
+  punti.forEach((p, i) => {
+    const colore = coloreLetteraPotenziale(p.valoreGrezzo);
+    const raggio = i === punti.length - 1 ? 5.5 : 4;
+    cerchi += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${raggio}" fill="${colore}" stroke="var(--bg)" stroke-width="1.5"><title>${formatDataIt(p.data)}: Potenziale ${esc(p.valoreGrezzo)}, media TIPS ${p.tipsMedia.toFixed(1)}</title></circle>`;
   });
 
   return `
     <svg viewBox="0 0 ${width} ${height}" width="100%" style="max-width:${width}px;">
-      ${griglia}
-      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="var(--line)" stroke-width="1" />
-      <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="var(--line)" stroke-width="1" />
-      ${etichetteX}
-      ${linee}
+      ${fasce}
+      ${separatori}
+      ${grigliaX}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1" />
+      <line x1="${padL}" y1="${(padT + plotH).toFixed(1)}" x2="${width - padR}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1" />
+      ${etichettaAsseX}
+      ${traiettoria}
+      ${freccia}
       ${cerchi}
-      ${labelFine}
     </svg>
     <div style="display:flex; flex-wrap:wrap; gap:14px; font-size:11px; color: var(--muted); margin-top:4px;">
-      ${PARAM_CANONICI_TIPS.map(param => `<span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: ${EVOLUZIONE_TIPS_COLORI[param]}; margin-right:5px;"></span>${esc(param)}</span>`).join("")}
+      <span><span style="display:inline-block; width:10px; height:2px; background: var(--gold); margin-right:5px; vertical-align:middle;"></span>Traiettoria nel tempo (freccia = direzione più recente)</span>
+      <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--good); margin-right:5px;"></span>Potenziale A</span>
+      <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--mid); margin-right:5px;"></span>Potenziale B</span>
+      <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--low); margin-right:5px;"></span>Potenziale C</span>
     </div>`;
 }
 
@@ -4971,7 +5042,7 @@ function apriDettaglio(id) {
   function vociGruppoHTML(voci) {
     return `<ul class="modal-list">
       ${ordinaVociGruppo(voci).map(v => `<li><strong>${esc(v.parametro)}</strong>
-        ${v.valoreNumerico !== undefined && v.valoreNumerico !== "" ? `<span class="rating-inline ${ratingClass(parseFloat(v.valoreNumerico))}">${v.valoreNumerico}</span>` : ""}
+        ${v.valoreNumerico !== undefined && v.valoreNumerico !== "" ? `<span class="rating-inline ${v.parametro === "Potenziale" ? classeLetteraPotenziale(v.valoreNumerico) : ratingClass(parseFloat(v.valoreNumerico))}">${v.valoreNumerico}</span>` : ""}
         ${v.notaScritta ? "<br><span class='muted'>" + esc(v.notaScritta) + "</span>" : ""}</li>`).join("")}
     </ul>`;
   }
@@ -5153,7 +5224,7 @@ function apriDettaglio(id) {
           </div>`;
         })()}
         <div class="modal-section"><h3>Media Tips (tutte le visionature)</h3><div class="medie-tips-grid">${medieHTML}</div></div>
-        <div class="modal-section"><h3>Evoluzione TIPS nel tempo</h3>${graficoEvoluzioneTipsSVG(p, { scoutFilter: filtroScouts })}</div>
+        <div class="modal-section"><h3>Matrice Potenziale × TIPS</h3>${graficoMatricePotenzialeSVG(p, { scoutFilter: filtroScouts })}</div>
         ${valOrfaneHTML ? `<div class="modal-section"><h3>Ultima valutazione</h3>${valOrfaneHTML}</div>` : ""}
         <div class="modal-section"><h3>Visionature</h3><div class="visionature-list">${visHTML}</div></div>
         <div class="modal-section no-print">
@@ -5408,6 +5479,13 @@ function creaGruppoValutazione(gruppo) {
     </div>
     <div class="qg-parametri-container"></div>
     <button type="button" class="btn btn-ghost btn-sm qg-add-parametro">+ Aggiungi parametro</button>
+    <details class="qg-potenziale-asf">
+      <summary>Calcola potenziale da checklist ASF <span class="qg-potenziale-badge rating-na">—</span></summary>
+      <div class="qg-potenziale-body">
+        <p class="muted" style="font-size:11.5px; margin:4px 0 8px;">Spunta le domande a cui rispondi sì: 2 = C, 3-4 = B, 5-6 = A. Il voto viene scritto automaticamente nel parametro "Potenziale" qui sopra. Come per i report importati da PDF, si salva solo il voto risultante, non le singole risposte: se riapri questa valutazione le caselle risultano vuote anche se un voto Potenziale è già presente.</p>
+        ${DOMANDE_POTENZIALE_ASF.map((d, i) => `<label class="qg-potenziale-domanda"><input type="checkbox" class="qg-potenziale-check" data-idx="${i}"> ${esc(d)}</label>`).join("")}
+      </div>
+    </details>
     <label class="qg-nota-label">Valutazione scritta
       <textarea class="qg-nota" rows="2">${esc(gruppo.nota || "")}</textarea>
     </label>
@@ -5416,6 +5494,28 @@ function creaGruppoValutazione(gruppo) {
   const paramContainer = div.querySelector(".qg-parametri-container");
   parametri.forEach(pm => paramContainer.appendChild(creaRigaParametroValutazione(pm.nome, pm.valore)));
   div.querySelector(".qg-add-parametro").onclick = () => paramContainer.appendChild(creaRigaParametroValutazione("", ""));
+
+  // Checklist ASF → voto Potenziale: ricalcola la lettera a ogni click e la
+  // scrive (creando o aggiornando la riga) nel parametro "Potenziale".
+  const potenzialeChecks = [...div.querySelectorAll(".qg-potenziale-check")];
+  const potenzialeBadge = div.querySelector(".qg-potenziale-badge");
+  function aggiornaPotenzialeDaChecklist() {
+    const count = potenzialeChecks.filter(c => c.checked).length;
+    const lettera = letteraPotenzialeDaConteggio(count);
+    potenzialeBadge.className = "qg-potenziale-badge " + (lettera ? classeLetteraPotenziale(lettera) : "rating-na");
+    potenzialeBadge.textContent = lettera ? `${lettera} (${count}/6)` : `${count}/6`;
+    if (!lettera) return;
+    let rigaPotenziale = [...paramContainer.querySelectorAll(".qg-parametro-row")]
+      .find(r => r.querySelector(".qg-param-nome").value.trim().toLowerCase() === "potenziale");
+    if (!rigaPotenziale) {
+      rigaPotenziale = creaRigaParametroValutazione("Potenziale", lettera);
+      paramContainer.appendChild(rigaPotenziale);
+    } else {
+      rigaPotenziale.querySelector(".qg-param-voto").value = lettera;
+    }
+  }
+  potenzialeChecks.forEach(c => c.addEventListener("change", aggiornaPotenzialeDaChecklist));
+
   return div;
 }
 
