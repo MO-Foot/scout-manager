@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 18/08/2026 · 23:56</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 19/08/2026 · 00:29</div>
         </div>
       </div>
     </header>
@@ -2886,7 +2886,7 @@ function graficoMatricePotenzialeSVG(player, { width = 560, height = 280, scoutF
   let cerchi = "";
   punti.forEach((p, i) => {
     const colore = coloreLetteraPotenziale(p.valoreGrezzo);
-    const raggio = i === punti.length - 1 ? 5.5 : 4;
+    const raggio = i === punti.length - 1 ? 4.5 : 3.5;
     cerchi += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${raggio}" fill="${colore}" stroke="var(--bg)" stroke-width="1.5"><title>${formatDataIt(p.data)}: Potenziale ${esc(p.valoreGrezzo)}, media TIPS ${p.tipsMedia.toFixed(1)}</title></circle>`;
   });
 
