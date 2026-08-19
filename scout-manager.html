@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 19/08/2026 · 00:29</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 19/08/2026 · 14:27</div>
         </div>
       </div>
     </header>
@@ -7041,9 +7041,19 @@ function renderImport(content) {
             });
             continue;
           }
+          const esitoCalendario = await elaboraFileCalendarioPartite(file);
+          if (esitoCalendario.riconosciuto) {
+            messaggi.push({
+              tipo: "ok",
+              testo: `${file.name} — calendario partite: ${esitoCalendario.aggiunti} partite aggiunte al Calendario` +
+                (esitoCalendario.giaPresenti ? `, ${esitoCalendario.giaPresenti} già presenti (saltate)` : "") +
+                (esitoCalendario.ignorati ? `, ${esitoCalendario.ignorati} righe ignorate (dati mancanti)` : ".")
+            });
+            continue;
+          }
           const esito = await elaboraFileMirwald(file);
           if (!esito.riconosciuto) {
-            messaggi.push({ tipo: "warn", testo: `${file.name} — formato Excel non riconosciuto: mi aspetto il file del test Mirwald (foglio "Eingabe_Input") o il file "Presenze partite" (colonne Cognome/Nome/Data/Avversario/Presenza).` });
+            messaggi.push({ tipo: "warn", testo: `${file.name} — formato Excel non riconosciuto: mi aspetto il file del test Mirwald (foglio "Eingabe_Input"), il file "Presenze partite" (colonne Cognome/Nome/Data/Avversario/Presenza) o il file "Calendario partite" (colonne Data/Competizione/Squadra/Avversario).` });
             continue;
           }
           messaggi.push({
@@ -7268,6 +7278,98 @@ async function elaboraFilePresenzePartite(file) {
   }
   if (aggiornati > 0) savePlayers();
   return { riconosciuto: true, aggiornati, nonTrovati, giaPresenti };
+}
+
+// Import "Calendario partite" — partite ANCORA DA GIOCARE (es. quelle in
+// programma nel prossimo weekend), da aggiungere come eventi di tipo
+// "Partita" nel Calendario. Complementa la ricerca automatica via Worker
+// Cloudflare (vedi cercaPartiteWeekend) per chi preferisce raccogliere le
+// partite a mano o non ha configurato un Worker.
+//
+// Firma del formato: richiede le intestazioni "data", "competizione",
+// "squadra", "avversario" — e la loro ASSENZA di "cognome"/"presenza",
+// che invece firmano il file "Presenze partite" (risultati già giocati).
+// Le due firme sono disgiunte apposta, per evitare che un file venga
+// scambiato per l'altro: qui non c'è alcuna colonna "Presenza" perché la
+// partita non è ancora stata giocata.
+//
+// Il campo "luogo" dell'evento viene scritto come "Squadra - Avversario":
+// è lo stesso formato "Squadra A - Squadra B" che calcolaColonneProbabiliGiocatori
+// riconosce per mostrare in automatico, sotto ogni evento, i giocatori
+// scoutati delle due squadre (stessa logica già usata dagli eventi creati
+// a mano o dalla ricerca weekend) — quindi qui non serve ricalcolare a
+// mano quali giocatori sono coinvolti.
+async function elaboraFileCalendarioPartite(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const nomeFoglio = wb.SheetNames[0];
+  const sheet = wb.Sheets[nomeFoglio];
+  const righe = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  if (!righe.length) return { riconosciuto: false };
+
+  const intestazioni = (righe[0] || []).map(h => (h || "").toString().trim().toLowerCase());
+  const richieste = ["data", "competizione", "squadra", "avversario"];
+  if (!richieste.every(r => intestazioni.includes(r))) return { riconosciuto: false };
+  // Non deve avere "cognome" o "presenza": altrimenti è il file "Presenze
+  // partite" (risultati), non questo (partite da giocare).
+  if (intestazioni.includes("cognome") || intestazioni.includes("presenza")) return { riconosciuto: false };
+
+  const idx = nome => intestazioni.indexOf(nome);
+  const iData = idx("data"), iOra = idx("ora"), iCompetizione = idx("competizione"),
+    iSquadra = idx("squadra"), iAvversario = idx("avversario"), iLuogo = idx("luogo"), iNote = idx("note");
+
+  const testo = v => (v === undefined || v === null) ? "" : v.toString().trim();
+  const toISO = d => {
+    if (!d) return "";
+    if (d instanceof Date) return d.toISOString().slice(0, 10);
+    if (typeof d === "string") {
+      const s = d.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      return normalizzaData(s) || s;
+    }
+    return "";
+  };
+
+  let aggiunti = 0, giaPresenti = 0, ignorati = 0;
+  for (let i = 1; i < righe.length; i++) {
+    const r = righe[i] || [];
+    const squadra = testo(r[iSquadra]);
+    const avversario = testo(r[iAvversario]);
+    const data = toISO(r[iData]);
+    if (!data || !squadra || !avversario) { ignorati++; continue; }
+
+    const luogoSquadre = `${squadra} - ${avversario}`;
+    const esiste = eventi.some(e => e.data === data && (e.luogo || "").trim() === luogoSquadre);
+    if (esiste) { giaPresenti++; continue; }
+
+    const oraGrezza = iOra >= 0 ? testo(r[iOra]) : "";
+    const oraValida = /^\d{1,2}:\d{2}$/.test(oraGrezza);
+    const noteParti = [
+      iCompetizione >= 0 ? testo(r[iCompetizione]) : "",
+      iLuogo >= 0 ? testo(r[iLuogo]) : "",
+      iNote >= 0 ? testo(r[iNote]) : "",
+    ].filter(Boolean);
+
+    eventi.push({
+      id: uid(),
+      data,
+      dataFine: "",
+      tipo: "Partita",
+      categoria: "Scouting",
+      luogo: luogoSquadre,
+      note: noteParti.join(" — "),
+      tuttoIlGiorno: !oraValida,
+      oraInizio: oraValida ? oraGrezza : "",
+      oraFine: "",
+      giocatoriIds: [],
+      modificatoIl: new Date().toISOString(),
+      googleEventId: null,
+      googleUpdated: null,
+    });
+    aggiunti++;
+  }
+  if (aggiunti > 0) savePlayers();
+  return { riconosciuto: true, aggiunti, giaPresenti, ignorati };
 }
 
 async function elaboraFileMirwald(file) {
