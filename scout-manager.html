@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 19/08/2026 · 14:27</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 20/08/2026 · 19:25</div>
         </div>
       </div>
     </header>
@@ -1551,6 +1551,7 @@ function parseDatabaseJSON(text) {
     ? { players: parsed, eventi: [], raduni: [], allenatori: [], esercizi: [] }
     : { players: parsed.players || [], eventi: parsed.eventi || [], raduni: parsed.raduni || [], allenatori: parsed.allenatori || [], esercizi: parsed.esercizi || [] };
   migraTuttiSquadraCategorie(risultato.players);
+  migraEserciziImmagini(risultato.esercizi);
   return risultato;
 }
 
@@ -1568,6 +1569,24 @@ const CATEGORIA_NUMERO_A_LABEL = { "14": "U14", "15": "U15", "16": "U16", "17": 
 // elenco (array), non come singolo valore — a differenza della categoria
 // fissa degli allenatori/giocatori qui sopra.
 const ESERCIZI_MACROCONTENITORI = ["Attacco", "Difesa", "Standards"];
+// "Contesto" = a chi/quale livello è pensato l'esercizio (a differenza del
+// macrocontenitore, che descrive COSA allena). Valore singolo, non elenco:
+// un esercizio di una fonte è scritto per un solo livello alla volta.
+const ESERCIZI_CONTESTI = ["Prime squadre", "Settore agonistico", "Attività di base", "Extra-time"];
+// Migrazione dal vecchio campo singolo "immagine" (stringa) al nuovo campo
+// "immagini" (elenco) — necessaria per gli esercizi creati prima che la
+// scheda supportasse più di uno schema campo per esercizio. Va richiamata
+// una volta al caricamento dei dati, come migraTuttiSquadraCategorie() per
+// i giocatori.
+function migraEserciziImmagini(elenco) {
+  (elenco || []).forEach(es => {
+    if (!Array.isArray(es.immagini)) {
+      es.immagini = es.immagine ? [es.immagine] : [];
+    }
+    delete es.immagine;
+    if (!Array.isArray(es.concetti)) es.concetti = [];
+  });
+}
 // "Carico" = intensità fisica dell'esercizio. Riusiamo le stesse classi CSS
 // rating-good/rating-mid/rating-low già usate altrove nell'app per i voti
 // (verde/oro/rosso), qui con un significato diverso: verde = carico basso,
@@ -4134,6 +4153,7 @@ async function boot() {
       raduni = localeCache.raduni || [];
       allenatori = localeCache.allenatori || [];
       esercizi = localeCache.esercizi || [];
+      migraEserciziImmagini(esercizi);
     }
     sincronizzazioneInSospeso = (await idbGet(CHIAVE_SYNC_IN_SOSPESO).catch(() => false)) || false;
   } catch (e) {
@@ -11073,6 +11093,17 @@ let eserciziSezione = "lista";
 let esercizioCorrenteId = null;
 let filtroTestoEsercizi = "";
 let filtroMacrocontenitori = new Set();
+let filtroContesti = new Set();
+
+// La ricerca guarda nome, descrizione, note, concetti chiave e autore — non
+// solo il titolo — così un esercizio si trova anche partendo da un concetto
+// che compare solo nel testo (es. "rondo", "pressing", "costruzione dal
+// basso") e non nel nome scelto per l'esercizio.
+function esercizioCorrispondeTesto(es, q) {
+  if (!q) return true;
+  const campi = [es.nome, es.descrizione, es.note, es.autore, ...(es.concetti || [])];
+  return campi.some(c => (c || "").toLowerCase().includes(q));
+}
 
 function renderEserciziario(content) {
   if (eserciziSezione === "form") { renderEsercizioForm(content); return; }
@@ -11089,10 +11120,13 @@ function renderEserciziLista(content) {
         <button class="btn btn-primary" id="btn-nuovo-esercizio">+ Nuovo esercizio</button>
       </div>
       <div class="filtri-bar" style="margin-top:14px;">
-        <input type="text" id="f-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome..." value="${esc(filtroTestoEsercizi)}">
+        <input type="text" id="f-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome, descrizione, note o concetto..." value="${esc(filtroTestoEsercizi)}">
       </div>
-      <div class="chips-group" id="chips-macrocontenitori" style="margin-top:10px; margin-bottom:20px;">
+      <div class="chips-group" id="chips-macrocontenitori" style="margin-top:10px; margin-bottom:10px;">
         ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip ${filtroMacrocontenitori.has(m) ? "chip-active" : ""}" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
+      </div>
+      <div class="chips-group" id="chips-contesti" style="margin-top:0; margin-bottom:20px;">
+        ${ESERCIZI_CONTESTI.map(c => `<button type="button" class="chip ${filtroContesti.has(c) ? "chip-active" : ""}" data-val="${esc(c)}">${esc(c)}</button>`).join("")}
       </div>
       <div class="import-subsection" id="esercizi-container"></div>
     </div>
@@ -11107,6 +11141,14 @@ function renderEserciziLista(content) {
       renderEserciziRisultati();
     };
   });
+  document.querySelectorAll("#chips-contesti .chip").forEach(chip => {
+    chip.onclick = () => {
+      const val = chip.dataset.val;
+      if (filtroContesti.has(val)) filtroContesti.delete(val); else filtroContesti.add(val);
+      chip.classList.toggle("chip-active");
+      renderEserciziRisultati();
+    };
+  });
   renderEserciziRisultati();
 }
 
@@ -11115,8 +11157,9 @@ function renderEserciziRisultati() {
   if (!container) return;
   const q = filtroTestoEsercizi.trim().toLowerCase();
   const elenco = esercizi
-    .filter(es => !q || (es.nome || "").toLowerCase().includes(q))
+    .filter(es => esercizioCorrispondeTesto(es, q))
     .filter(es => !filtroMacrocontenitori.size || (es.macrocontenitori || []).some(m => filtroMacrocontenitori.has(m)))
+    .filter(es => !filtroContesti.size || filtroContesti.has(es.contesto))
     .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
 
   container.innerHTML = elenco.length
@@ -11134,16 +11177,20 @@ function esercizioCardHTML(es, modalitaScelta) {
     es.numeroGiocatori ? `${esc(es.numeroGiocatori)} giocatori` : "",
   ].filter(Boolean).join(" · ");
   const dataAttr = modalitaScelta ? `data-scegli-esercizio="${esc(es.id)}"` : `data-apri-esercizio="${esc(es.id)}"`;
+  const copertina = (es.immagini || [])[0];
+  const concetti = (es.concetti || []).slice(0, 4);
   return `
     <div class="candidato-card" ${dataAttr} style="cursor:pointer;">
-      ${es.immagine ? `<div class="tabella-foto" style="width:100%; height:120px; border-radius:8px; margin-bottom:8px;"><img src="${esc(es.immagine)}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:8px;"></div>` : ""}
+      ${copertina ? `<div class="tabella-foto" style="width:100%; height:120px; border-radius:8px; margin-bottom:8px; position:relative;"><img src="${esc(copertina)}" alt="" style="width:100%; height:100%; object-fit:cover; border-radius:8px;">${(es.immagini || []).length > 1 ? `<span class="muted" style="position:absolute; bottom:4px; right:6px; font-family:var(--font-mono); font-size:10px; background:rgba(13,23,18,0.75); padding:1px 6px; border-radius:8px;">+${es.immagini.length - 1}</span>` : ""}</div>` : ""}
       <div class="candidato-card-header">
         <strong>${esc(es.nome || "Esercizio senza nome")}</strong>
       </div>
       <div class="card-etichette" style="margin-top:6px;">
         ${(es.macrocontenitori || []).map(m => `<span class="chip chip-active" style="cursor:default;">${esc(m)}</span>`).join("")}
+        ${es.contesto ? `<span class="chip" style="cursor:default; border-color:var(--info); color:var(--info);">${esc(es.contesto)}</span>` : ""}
         ${es.carico ? `<span class="carico-badge ${caricoClasse(es.carico)}">Carico ${esc(es.carico)}</span>` : ""}
       </div>
+      ${concetti.length ? `<div class="card-etichette" style="margin-top:4px;">${concetti.map(c => `<span class="chip" style="cursor:default; font-size:10.5px; padding:3px 9px;">${esc(c)}</span>`).join("")}</div>` : ""}
       <p class="muted" style="font-size:12.5px; margin:6px 0 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         ${starsHTML(es.rating)}
         ${dettagli ? `<span>${dettagli}</span>` : ""}
@@ -11170,7 +11217,7 @@ function apriPickerEsercizio(onScegli) {
     if (!container) return;
     const q = testoPicker.trim().toLowerCase();
     const elenco = esercizi
-      .filter(es => !q || (es.nome || "").toLowerCase().includes(q))
+      .filter(es => esercizioCorrispondeTesto(es, q))
       .filter(es => !macroPicker.size || (es.macrocontenitori || []).some(m => macroPicker.has(m)))
       .sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "it"));
     container.innerHTML = elenco.length
@@ -11190,7 +11237,7 @@ function apriPickerEsercizio(onScegli) {
         <button class="modal-close no-print" id="modal-close-picker-esercizio" title="Chiudi">✕</button>
         <h2 style="margin-top:0;">Sfoglia Eserciziario</h2>
         <div class="filtri-bar">
-          <input type="text" id="picker-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome...">
+          <input type="text" id="picker-esercizi-testo" class="f-input f-testo" placeholder="Cerca per nome, descrizione, note o concetto...">
         </div>
         <div class="chips-group" id="picker-chips-macrocontenitori" style="margin-top:10px; margin-bottom:20px;">
           ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
@@ -11219,23 +11266,62 @@ function chiudiPickerEsercizio() {
   if (root) root.innerHTML = "";
 }
 
+// Griglia di miniature per la galleria immagini dell'esercizio (più di una
+// per esercizio, a differenza del vecchio campo singolo "immagine" — utile
+// perché una fonte come una rivista spesso collega più schemi campo a uno
+// stesso esercizio, es. "figura 3 e 4").
+function galleriaImmaginiHTML(immagini) {
+  if (!immagini.length) {
+    return `<p class="muted" id="es-galleria-vuota" style="font-size:12.5px;">Nessuno schema campo caricato ancora.</p>`;
+  }
+  return `
+    <div id="es-galleria-grid" style="display:flex; flex-wrap:wrap; gap:10px;">
+      ${immagini.map((src, i) => `
+        <div class="foto-preview-wrap" data-idx="${i}" style="width:110px; height:110px; position:relative;">
+          <img class="foto-preview" src="${esc(src)}" alt="" style="width:100%; height:100%; object-fit:cover;">
+          <button type="button" class="btn-rimuovi-img-galleria" data-idx="${i}" title="Rimuovi" style="position:absolute; top:4px; right:4px; width:22px; height:22px; border-radius:50%; border:1px solid var(--line); background:var(--bg-pitch); color:var(--chalk); cursor:pointer; line-height:1;">✕</button>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderEsercizioForm(content) {
   const es = esercizioCorrenteId ? esercizi.find(x => x.id === esercizioCorrenteId) : null;
   const macroSelezionati = new Set(es && es.macrocontenitori ? es.macrocontenitori : []);
+  let immaginiCorrenti = es && es.immagini ? [...es.immagini] : [];
+  let concettiCorrenti = es && es.concetti ? [...es.concetti] : [];
+
+  function ridisegnaGalleria() {
+    document.getElementById("es-galleria-container").innerHTML = galleriaImmaginiHTML(immaginiCorrenti);
+    document.querySelectorAll(".btn-rimuovi-img-galleria").forEach(btn => {
+      btn.onclick = () => {
+        immaginiCorrenti.splice(parseInt(btn.dataset.idx, 10), 1);
+        ridisegnaGalleria();
+      };
+    });
+  }
+
+  function ridisegnaConcetti() {
+    document.getElementById("es-concetti-chips").innerHTML = concettiCorrenti.map((c, i) => `
+      <span class="chip chip-active" style="cursor:default; display:inline-flex; align-items:center; gap:6px;">${esc(c)}<span data-idx="${i}" class="btn-rimuovi-concetto" style="cursor:pointer;">✕</span></span>
+    `).join("");
+    document.querySelectorAll(".btn-rimuovi-concetto").forEach(btn => {
+      btn.onclick = () => {
+        concettiCorrenti.splice(parseInt(btn.dataset.idx, 10), 1);
+        ridisegnaConcetti();
+      };
+    });
+  }
+
   content.innerHTML = `
     <div class="import-box">
       <h2>${es ? "Modifica esercizio" : "Nuovo esercizio"}</h2>
 
-      <div class="foto-upload">
-        <div class="foto-preview-wrap">
-          <img id="es-immagine-preview" class="foto-preview ${es && es.immagine ? "" : "foto-vuota"}" src="${es && es.immagine ? esc(es.immagine) : ""}" alt="">
-          <svg id="es-immagine-placeholder" class="foto-placeholder" style="display:${es && es.immagine ? "none" : "block"}" viewBox="0 0 64 64" width="56" height="56"><rect x="10" y="14" width="44" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="22" cy="26" r="4" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M12 44l14-12 10 8 8-6 8 10" fill="none" stroke="currentColor" stroke-width="2.5"/></svg>
-        </div>
-        <div class="foto-upload-actions">
-          <label class="btn btn-ghost btn-sm file-label">Carica schema campo<input type="file" id="es-immagine-input" accept="image/*"></label>
-          <button type="button" class="btn btn-ghost btn-sm" id="btn-rimuovi-immagine-esercizio" style="display:${es && es.immagine ? "inline-flex" : "none"}">Rimuovi immagine</button>
-        </div>
-      </div>
+      <label class="full">Schemi campo / immagini <span class="muted" style="font-weight:400;">(puoi caricarne più di una)</span>
+        <div id="es-galleria-container" style="margin:8px 0 10px;"></div>
+        <label class="btn btn-ghost btn-sm file-label" style="width:fit-content;">+ Aggiungi immagine<input type="file" id="es-immagine-input" accept="image/*" multiple></label>
+      </label>
 
       <div class="form-grid">
         <label>Nome*
@@ -11259,12 +11345,29 @@ function renderEsercizioForm(content) {
         <label>Link video
           <input type="url" id="es-video" placeholder="https://..." value="${es && es.video ? esc(es.video) : ""}">
         </label>
+        <label>Autore <span class="muted" style="font-weight:400;">(opzionale)</span>
+          <input type="text" id="es-autore" placeholder="es. nome dell'allenatore/fonte" value="${es && es.autore ? esc(es.autore) : ""}">
+        </label>
+        <label>Fonte <span class="muted" style="font-weight:400;">(opzionale)</span>
+          <input type="text" id="es-fonte" placeholder="es. rivista, libro, pagina" value="${es && es.fonte ? esc(es.fonte) : ""}">
+        </label>
       </div>
 
       <label class="full">Macrocontenitore <span class="muted" style="font-weight:400;">(puoi selezionarne più di uno)</span>
         <div class="chips-group" id="es-macrocontenitori-chips" style="margin-top:6px;">
           ${ESERCIZI_MACROCONTENITORI.map(m => `<button type="button" class="chip ${macroSelezionati.has(m) ? "chip-active" : ""}" data-val="${esc(m)}">${esc(m)}</button>`).join("")}
         </div>
+      </label>
+
+      <label class="full">Contesto <span class="muted" style="font-weight:400;">(a chi è rivolto — scegline uno)</span>
+        <div class="chips-group" id="es-contesto-chips" style="margin-top:6px;">
+          ${ESERCIZI_CONTESTI.map(c => `<button type="button" class="chip ${es && es.contesto === c ? "chip-active" : ""}" data-val="${esc(c)}">${esc(c)}</button>`).join("")}
+        </div>
+      </label>
+
+      <label class="full">Concetti chiave <span class="muted" style="font-weight:400;">(parole utili per ritrovare l'esercizio con la ricerca — premi Invio per aggiungerne una)</span>
+        <div class="chips-group" id="es-concetti-chips" style="margin-top:6px; margin-bottom:8px;"></div>
+        <input type="text" id="es-concetto-input" placeholder="es. rondo, pressing, costruzione dal basso — poi Invio">
       </label>
 
       <label class="full">Valutazione
@@ -11290,9 +11393,30 @@ function renderEsercizioForm(content) {
     </div>
   `;
 
+  ridisegnaGalleria();
+  ridisegnaConcetti();
+
   document.querySelectorAll("#es-macrocontenitori-chips .chip").forEach(chip => {
     chip.onclick = () => chip.classList.toggle("chip-active");
   });
+  document.querySelectorAll("#es-contesto-chips .chip").forEach(chip => {
+    chip.onclick = () => {
+      const giaAttivo = chip.classList.contains("chip-active");
+      document.querySelectorAll("#es-contesto-chips .chip").forEach(c => c.classList.remove("chip-active"));
+      if (!giaAttivo) chip.classList.add("chip-active");
+    };
+  });
+
+  document.getElementById("es-concetto-input").onkeydown = e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const val = e.target.value.trim();
+    if (val && !concettiCorrenti.some(c => c.toLowerCase() === val.toLowerCase())) {
+      concettiCorrenti.push(val);
+      ridisegnaConcetti();
+    }
+    e.target.value = "";
+  };
 
   const ratingInput = document.getElementById("es-rating-input");
   ratingInput.querySelectorAll(".star").forEach(star => {
@@ -11303,42 +11427,32 @@ function renderEsercizioForm(content) {
     };
   });
 
-  let immagineCorrente = es && es.immagine ? es.immagine : "";
   document.getElementById("es-immagine-input").onchange = async e => {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      immagineCorrente = await ridimensionaImmagine(file, 480, 0.8);
-      const img = document.getElementById("es-immagine-preview");
-      img.src = immagineCorrente;
-      img.classList.remove("foto-vuota");
-      document.getElementById("es-immagine-placeholder").style.display = "none";
-      document.getElementById("btn-rimuovi-immagine-esercizio").style.display = "inline-flex";
+      const dataUrl = await ridimensionaImmagine(file, 480, 0.8);
+      immaginiCorrenti.push(dataUrl);
+      ridisegnaGalleria();
     } catch (err) {
       alert("Non sono riuscito a caricare questa immagine: " + err.message);
+    } finally {
+      e.target.value = "";
     }
-  };
-  document.getElementById("btn-rimuovi-immagine-esercizio").onclick = () => {
-    immagineCorrente = "";
-    const img = document.getElementById("es-immagine-preview");
-    img.src = "";
-    img.classList.add("foto-vuota");
-    document.getElementById("es-immagine-placeholder").style.display = "block";
-    document.getElementById("btn-rimuovi-immagine-esercizio").style.display = "none";
-    document.getElementById("es-immagine-input").value = "";
   };
 
   document.getElementById("btn-annulla-esercizio").onclick = () => {
     eserciziSezione = es ? "dettaglio" : "lista";
     render();
   };
-  document.getElementById("btn-salva-esercizio").onclick = () => salvaEsercizioDaForm(es, () => immagineCorrente);
+  document.getElementById("btn-salva-esercizio").onclick = () => salvaEsercizioDaForm(es, () => immaginiCorrenti, () => concettiCorrenti);
 }
 
-function salvaEsercizioDaForm(vecchioEsercizio, leggiImmagine) {
+function salvaEsercizioDaForm(vecchioEsercizio, leggiImmagini, leggiConcetti) {
   const nome = document.getElementById("es-nome").value.trim();
   if (!nome) { alert("Inserisci il nome dell'esercizio."); return; }
   const macrocontenitori = [...document.querySelectorAll("#es-macrocontenitori-chips .chip.chip-active")].map(c => c.dataset.val);
+  const contestoAttivo = document.querySelector("#es-contesto-chips .chip.chip-active");
   const rating = parseInt(document.getElementById("es-rating-input").dataset.value, 10) || 0;
 
   const esercizio = {
@@ -11348,12 +11462,16 @@ function salvaEsercizioDaForm(vecchioEsercizio, leggiImmagine) {
     modificatoIl: new Date().toISOString(),
     nome,
     macrocontenitori,
+    contesto: contestoAttivo ? contestoAttivo.dataset.val : "",
+    concetti: leggiConcetti(),
     descrizione: document.getElementById("es-descrizione").value.trim(),
-    immagine: leggiImmagine(),
+    immagini: leggiImmagini(),
     durataMinuti: document.getElementById("es-durata").value.trim(),
     numeroGiocatori: document.getElementById("es-numgiocatori").value.trim(),
     materiale: document.getElementById("es-materiale").value.trim(),
     video: document.getElementById("es-video").value.trim(),
+    autore: document.getElementById("es-autore").value.trim(),
+    fonte: document.getElementById("es-fonte").value.trim(),
     carico: document.getElementById("es-carico").value || "",
     rating,
     note: document.getElementById("es-note").value.trim(),
@@ -11397,18 +11515,26 @@ function renderEsercizioDettaglio(content) {
       </div>
       <div class="card-etichette" style="margin-top:6px;">
         ${(es.macrocontenitori || []).map(m => `<span class="chip chip-active" style="cursor:default;">${esc(m)}</span>`).join("")}
+        ${es.contesto ? `<span class="chip" style="cursor:default; border-color:var(--info); color:var(--info);">${esc(es.contesto)}</span>` : ""}
         ${es.carico ? `<span class="carico-badge ${caricoClasse(es.carico)}">Carico ${esc(es.carico)}</span>` : ""}
       </div>
+      ${(es.concetti || []).length ? `<div class="card-etichette" style="margin-top:6px;">${es.concetti.map(c => `<span class="chip" style="cursor:default;">${esc(c)}</span>`).join("")}</div>` : ""}
       <p style="margin:8px 0;">${starsHTML(es.rating)}</p>
       <p class="muted" style="font-size:13px;">
         ${[
           es.durataMinuti ? `Durata: ${esc(es.durataMinuti)} min` : "",
           es.numeroGiocatori ? `Giocatori: ${esc(es.numeroGiocatori)}` : "",
           es.materiale ? `Materiale: ${esc(es.materiale)}` : "",
+          es.autore ? `Autore: ${esc(es.autore)}` : "",
+          es.fonte ? `Fonte: ${esc(es.fonte)}` : "",
         ].filter(Boolean).join(" · ")}
       </p>
       ${es.video ? `<p><a href="${esc(es.video)}" target="_blank" rel="noopener">▶ Video dimostrativo</a></p>` : ""}
-      ${es.immagine ? `<div class="foto-ingrandita-box" style="max-width:420px; margin:10px 0;"><img src="${esc(es.immagine)}" alt="" style="width:100%; border-radius:8px;"></div>` : ""}
+      ${(es.immagini || []).length ? `
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin:10px 0;">
+          ${es.immagini.map(src => `<div class="foto-ingrandita-box modal-photo-clickable" data-src="${esc(src)}" style="width:200px;"><img src="${esc(src)}" alt="" style="width:100%; border-radius:8px; display:block;"></div>`).join("")}
+        </div>
+      ` : ""}
 
       <div class="modal-section">
         <h3>Descrizione / svolgimento</h3>
@@ -11426,6 +11552,9 @@ function renderEsercizioDettaglio(content) {
   document.getElementById("btn-torna-lista-esercizi").onclick = () => { eserciziSezione = "lista"; render(); };
   document.getElementById("btn-modifica-esercizio").onclick = () => { eserciziSezione = "form"; render(); };
   document.getElementById("btn-elimina-esercizio").onclick = () => eliminaEsercizio(es.id);
+  content.querySelectorAll(".modal-photo-clickable").forEach(el => {
+    el.onclick = () => apriLightbox(el.dataset.src);
+  });
 }
 
 /* ===================== BACKUP ===================== */
