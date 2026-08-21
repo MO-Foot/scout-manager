@@ -1568,7 +1568,7 @@ const CATEGORIA_NUMERO_A_LABEL = { "14": "U14", "15": "U15", "16": "U16", "17": 
 // esercizio che lavora sia Attacco che Standards), quindi è salvato come
 // elenco (array), non come singolo valore — a differenza della categoria
 // fissa degli allenatori/giocatori qui sopra.
-const ESERCIZI_MACROCONTENITORI = ["Attacco", "Difesa", "Standards"];
+const ESERCIZI_MACROCONTENITORI = ["Messa in Moto", "Esercizi", "Situazionale", "Giochi", "Attacco", "Difesa", "Transizioni", "Standards"];
 // "Contesto" = a chi/quale livello è pensato l'esercizio (a differenza del
 // macrocontenitore, che descrive COSA allena). Valore singolo, non elenco:
 // un esercizio di una fonte è scritto per un solo livello alla volta.
@@ -11115,7 +11115,7 @@ function renderEserciziLista(content) {
   content.innerHTML = `
     <div class="import-box">
       <h2>Eserciziario</h2>
-      <p class="muted">Libreria degli esercizi di allenamento, divisa in Attacco / Difesa / Standards (un esercizio può appartenere a più di un macrocontenitore). Da qui potrete in futuro richiamare un esercizio direttamente in un allenamento di un raduno.</p>
+      <p class="muted">Libreria degli esercizi di allenamento, organizzata per tipologia (Messa in Moto / Esercizi / Situazionale / Giochi) e per contenuto tattico (Attacco / Difesa / Transizioni / Standards) — un esercizio può appartenere a più di un'etichetta. Da qui potrete in futuro richiamare un esercizio direttamente in un allenamento di un raduno.</p>
       <div class="import-actions">
         <button class="btn btn-primary" id="btn-nuovo-esercizio">+ Nuovo esercizio</button>
       </div>
@@ -11540,6 +11540,12 @@ function renderEsercizioDettaglio(content) {
         <h3>Descrizione / svolgimento</h3>
         <p style="white-space:pre-wrap;">${es.descrizione ? esc(es.descrizione) : `<span class="muted">Nessuna descrizione ancora — aggiungila da "Modifica".</span>`}</p>
       </div>
+
+      ${es.linkCartellaOriginale ? `
+      <p style="margin:10px 0;">
+        <a href="${esc(es.linkCartellaOriginale)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📁 Apri cartella originali (${esc(es.cartellaOriginale || "")})</a>
+        <span class="muted" style="font-size:12.5px; margin-left:8px;">Il nome esatto del file (ed eventuale pagina) è indicato qui sotto in "Note".</span>
+      </p>` : ""}
 
       ${es.note ? `
       <div class="modal-section">
