@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 09:30</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 11:00</div>
         </div>
       </div>
     </header>
@@ -6623,9 +6623,37 @@ function parseCandidatiDocx(html, scoutDefault, nomeFile) {
      (numeri con un decimale) ed eventualmente un blocco "Commento" con il
      testo esteso. Importiamo solo i giocatori che hanno ALMENO un voto
      numerico E un commento scritto. */
+function normalizzaTokenSplitNome(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
 function splitNomeCognome(nomeCompleto) {
   const parole = nomeCompleto.split(/\s+/).filter(Boolean);
   if (parole.length <= 1) return { cognome: parole[0] || "", nome: "" };
+
+  // Prima di indovinare a metà, controlliamo se il nome completo corrisponde
+  // (come insieme di parole, ordine indifferente) a un giocatore già
+  // presente in Elenco: se sì, usiamo la SUA divisione cognome/nome reale.
+  // Senza questo controllo, un nome di 3+ parole come "Renzi Brayan
+  // Leonardo" (cognome di una parola, nome di due) veniva tagliato a metà
+  // ("Renzi Brayan" / "Leonardo"), creando una scheda duplicata invece di
+  // aggiornare quella corretta già presente.
+  if (typeof players !== "undefined" && players && players.length) {
+    const tokenGrezzo = normalizzaTokenSplitNome(nomeCompleto);
+    const corrispondenze = players.filter(p => normalizzaTokenSplitNome(`${p.cognome} ${p.nome}`) === tokenGrezzo);
+    if (corrispondenze.length === 1) {
+      return { cognome: corrispondenze[0].cognome, nome: corrispondenze[0].nome };
+    }
+  }
+
   const meta = Math.ceil(parole.length / 2);
   return { cognome: parole.slice(0, meta).join(" "), nome: parole.slice(meta).join(" ") };
 }
