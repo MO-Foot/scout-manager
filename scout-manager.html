@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 21/08/2026 · 10:15</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 09:30</div>
         </div>
       </div>
     </header>
@@ -6954,14 +6954,14 @@ function renderImport(content) {
       <h2>Importa relazioni</h2>
       <div class="import-subsection">
         <h3>Importa relazione</h3>
-        <p class="muted">Carica uno o più file: report PDF ClubCorner (italiano/francese) o Scouting-Bericht SFV/ASF in tedesco ("Scouting-Bericht (Spiel)"), relazione Word (.docx — sia il formato libero a paragrafi, sia il modello tabellare), il file Excel del test Mirwald, il file Excel "Presenze partite" (aggiornamento presenze/gol dal MatchCenter), oppure i report prestazioni GPS del preparatore atletico (dashboard Power BI per i giocatori di movimento, report Catapult per i portieri). Dai PDF di valutazione partita vengono presi i voti T/I/P/S, la media, il voto sul rendimento (B.E.), il voto partita, il voto sul potenziale (lettera) e il commento scritto vero e proprio — non le domande a crocette sul potenziale, che restano solo nel PDF originale. L'app riconosce da sola il tipo di ogni file; se uno non è leggibile te lo segnalo invece di ignorarlo in silenzio.</p>
+        <p class="muted">Carica uno o più file: report PDF ClubCorner (italiano/francese) o Scouting-Bericht SFV/ASF in tedesco ("Scouting-Bericht (Spiel)"), relazione Word (.docx — sia il formato libero a paragrafi, sia il modello tabellare), il file Excel del test Mirwald, il file Excel o JSON "Presenze partite" (aggiornamento presenze/gol dal MatchCenter — il file JSON è generato direttamente dal prompt di progetto dedicato, senza passare da un Excel), oppure i report prestazioni GPS del preparatore atletico (dashboard Power BI per i giocatori di movimento, report Catapult per i portieri). Dai PDF di valutazione partita vengono presi i voti T/I/P/S, la media, il voto sul rendimento (B.E.), il voto partita, il voto sul potenziale (lettera) e il commento scritto vero e proprio — non le domande a crocette sul potenziale, che restano solo nel PDF originale. L'app riconosce da sola il tipo di ogni file; se uno non è leggibile te lo segnalo invece di ignorarlo in silenzio.</p>
         <div class="import-controls">
           <label class="docx-scout-label">Scout per questo caricamento <span class="muted" style="font-weight:400;">(usato per PDF e Word, se il file stesso non lo specifica)</span>
             <input type="text" id="import-scout-default" list="scout-datalist" placeholder="Nome dello scout">
           </label>
         </div>
         <div class="import-controls">
-          <input type="file" id="import-unificato-input" accept=".pdf,.docx,.xlsx" multiple>
+          <input type="file" id="import-unificato-input" accept=".pdf,.docx,.xlsx,.json" multiple>
           <span id="import-status" class="muted"></span>
         </div>
         <details class="raw-text-details">
@@ -7082,8 +7082,21 @@ function renderImport(content) {
               (esito.nonTrovati.length ? `, ${esito.nonTrovati.length} non trovati in anagrafica (${esito.nonTrovati.join(", ")})` : ".")
           });
 
+        } else if (estensione === "json") {
+          const esitoPresenzeJSON = await elaboraFilePresenzePartiteJSON(file);
+          if (esitoPresenzeJSON.riconosciuto) {
+            messaggi.push({
+              tipo: "ok",
+              testo: `${file.name} — presenze partite (JSON): ${esitoPresenzeJSON.aggiornati} nuove registrate` +
+                (esitoPresenzeJSON.giaPresenti ? `, ${esitoPresenzeJSON.giaPresenti} già presenti (saltate)` : "") +
+                (esitoPresenzeJSON.nonTrovati.length ? `, ${esitoPresenzeJSON.nonTrovati.length} non trovati in anagrafica (${esitoPresenzeJSON.nonTrovati.join(", ")})` : ".")
+            });
+            continue;
+          }
+          messaggi.push({ tipo: "warn", testo: `${file.name} — formato JSON non riconosciuto: mi aspetto un array di presenze con almeno le chiavi "cognome", "nome", "data", "presenza" (vedi il prompt di progetto "Presenze partite"). Se invece volevi ripristinare un backup completo del database, usa il pulsante "Ripristina da file" più sopra, non questo importatore.` });
+
         } else {
-          messaggi.push({ tipo: "warn", testo: `${file.name} — formato non compatibile: uso solo file .pdf, .docx o .xlsx.` });
+          messaggi.push({ tipo: "warn", testo: `${file.name} — formato non compatibile: uso solo file .pdf, .docx, .xlsx o .json.` });
         }
       } catch (err) {
         console.error(err);
@@ -7223,6 +7236,71 @@ function elaboraTestoPrestazioniGPS(text, nomeFile) {
 
   if (aggiornati > 0) savePlayers();
   return { riconosciuto: true, tipo: isGK ? "gk" : "outfield", aggiornati, nonTrovati };
+}
+
+// Import "Presenze partite" in formato JSON — stessa identica destinazione
+// dati di elaboraFilePresenzePartite (sotto), ma legge un file .json invece
+// di un .xlsx: pensato per essere generato direttamente da un'analisi
+// MatchCenter (vedi il prompt di progetto "Prompt settimanale — Ricerca
+// partite MatchCenter"), senza passare da un file Excel intermedio.
+//
+// Formato atteso: un array JSON di oggetti, uno per ogni presenza trovata,
+// con queste chiavi (tutte stringhe tranne minutiGiocati/gol che sono
+// numeri o null; "link" è opzionale):
+// [{ "cognome": "...", "nome": "...", "data": "AAAA-MM-GG",
+//    "competizione": "...", "squadra": "...", "avversario": "...",
+//    "risultato": "...", "presenza": "Titolare|Subentrato|Panchina (non entrato)|Non convocato",
+//    "minutiGiocati": 90, "gol": 0, "note": "Fonte: MatchCenter SFL",
+//    "link": "https://matchcenter-sfl.football.ch/..." }, ...]
+async function elaboraFilePresenzePartiteJSON(file) {
+  const testoFile = await file.text();
+  let dati;
+  try { dati = JSON.parse(testoFile); } catch (e) { return { riconosciuto: false }; }
+
+  // Accetta sia un array nudo sia { presenze: [...] }, per tolleranza.
+  const righe = Array.isArray(dati) ? dati : (Array.isArray(dati?.presenze) ? dati.presenze : null);
+  if (!righe) return { riconosciuto: false };
+  // Firma del formato: se non è vuoto, il primo elemento deve avere almeno
+  // cognome/nome/data/presenza, altrimenti non è questo formato.
+  if (righe.length && !("cognome" in righe[0] && "nome" in righe[0] && "data" in righe[0] && "presenza" in righe[0])) {
+    return { riconosciuto: false };
+  }
+
+  const testo = v => (v === undefined || v === null) ? "" : v.toString().trim();
+  const numOrNull = v => (v === undefined || v === null || v === "") ? null : parseFloat(v);
+
+  let aggiornati = 0, giaPresenti = 0;
+  const nonTrovati = [];
+  for (const r of righe) {
+    const cognome = testo(r.cognome);
+    if (!cognome) continue;
+    const nome = testo(r.nome);
+    const data = testo(r.data);
+    const avversario = testo(r.avversario);
+
+    const p = trovaGiocatoreEsistente(cognome, nome, null);
+    if (!p) { nonTrovati.push(`${cognome} ${nome}`); continue; }
+
+    if (!p.partiteUfficiali) p.partiteUfficiali = [];
+    const esiste = p.partiteUfficiali.some(m => m.data === data && (m.avversario || "") === avversario);
+    if (esiste) { giaPresenti++; continue; }
+
+    p.partiteUfficiali.push({
+      data,
+      competizione: testo(r.competizione),
+      squadra: testo(r.squadra),
+      avversario,
+      risultato: testo(r.risultato),
+      presenza: testo(r.presenza),
+      minutiGiocati: numOrNull(r.minutiGiocati),
+      gol: numOrNull(r.gol),
+      note: testo(r.note) || "Fonte: MatchCenter SFL",
+      ...(testo(r.link) ? { link: testo(r.link) } : {}),
+    });
+    aggiornati++;
+  }
+  if (aggiornati > 0) savePlayers();
+  return { riconosciuto: true, aggiornati, nonTrovati, giaPresenti };
 }
 
 async function elaboraFilePresenzePartite(file) {
@@ -11543,8 +11621,8 @@ function renderEsercizioDettaglio(content) {
 
       ${es.linkCartellaOriginale ? `
       <p style="margin:10px 0;">
-        <a href="${esc(es.linkCartellaOriginale)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📁 Apri cartella originali (${esc(es.cartellaOriginale || "")})</a>
-        <span class="muted" style="font-size:12.5px; margin-left:8px;">Il nome esatto del file (ed eventuale pagina) è indicato qui sotto in "Note".</span>
+        <a href="${esc(es.linkCartellaOriginale)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${esc(es.labelLinkOriginale || "📁 Apri file/cartella originali")}</a>
+        <span class="muted" style="font-size:12.5px; margin-left:8px;">Il nome esatto del file (ed eventuale pagina) è indicato qui sotto in "Note"/"Fonte".</span>
       </p>` : ""}
 
       ${es.note ? `
