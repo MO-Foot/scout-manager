@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 12:10 (CEST)</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:05 (CEST)</div>
         </div>
       </div>
     </header>
@@ -8196,10 +8196,7 @@ function renderPresenze(content) {
             <strong>Settimana ${formatRangeSettimana(sett.lunedi, sett.domenica)}</strong>
             <span class="muted" style="font-size:12.5px;">${giocatoriCoinvolti} giocator${giocatoriCoinvolti === 1 ? "e coinvolto" : "i coinvolti"}${competizioniSettimana.length ? " — " + competizioniSettimana.map(c => esc(c)).join(", ") : ""}</span>
           </div>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <button type="button" class="btn btn-ghost btn-sm no-print" data-esporta-settimana="${esc(key)}" title="Esporta un Excel con il riepilogo (colorato per stato di convocazione) e il dettaglio partite di questa settimana, incrociati con la rosa di un raduno">📊 Esporta Excel</button>
-            <span class="presenze-chevron">▶</span>
-          </div>
+          <span class="presenze-chevron">▶</span>
         </summary>
         <div class="presenze-settimana-body">
           <table class="tabella-giocatori tabella-presenze">
@@ -8226,6 +8223,7 @@ function renderPresenze(content) {
           ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroPresenzeEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
         </div>
       </details>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-report-presenze" style="margin-left:auto;">📊 Report</button>
     </div>
     <div class="presenze-lista">${settimaneHTML}</div>
   `;
@@ -8271,16 +8269,7 @@ function renderPresenze(content) {
     tr.onclick = () => apriDettaglio(tr.dataset.id);
   });
 
-  content.querySelectorAll("[data-esporta-settimana]").forEach(btn => {
-    btn.onclick = (e) => {
-      // Il bottone vive dentro un <summary>: senza preventDefault/stopPropagation
-      // il click aprirebbe/chiuderebbe anche la settimana invece di limitarsi
-      // ad aprire la modale di esportazione.
-      e.preventDefault();
-      e.stopPropagation();
-      apriModalEsportaPresenzeSettimana(btn.dataset.esportaSettimana);
-    };
-  });
+  document.getElementById("btn-report-presenze").onclick = apriModalReportPresenze;
 }
 
 // Colore ARGB (per ExcelJS) dello stato di un giocatore in rosa a un raduno —
@@ -8295,60 +8284,147 @@ function coloreStatoArgb(chiave) {
   return "FF" + s.colore.replace("#", "").toUpperCase();
 }
 
-// Modale per scegliere quale rosa di raduno usare come riferimento
-// (Stato/Reparto/Ruolo) prima di generare il report presenze di una
-// settimana — la stessa settimana espansa/collassata nell'elenco.
-function apriModalEsportaPresenzeSettimana(key) {
+// Tutte le settimane (lunedì ISO -> {lunedi, domenica, label}) in cui
+// ESISTE almeno una partita ufficiale di un giocatore qualsiasi — usata per
+// popolare la tendina "Settimana" della modale Report, indipendentemente
+// dai filtri/dalla settimana aperta al momento sullo schermo.
+function tutteLeSettimanePresenze() {
+  const map = new Map();
+  players.forEach(p => (p.partiteUfficiali || []).forEach(m => {
+    if (!m.data) return;
+    const lun = lunediSettimanaDi(m.data);
+    const key = isoLocale(lun);
+    if (!map.has(key)) map.set(key, { lunedi: lun, domenica: domenicaSettimanaDi(lun) });
+  }));
+  return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+}
+
+// Modale unica per il report presenze: si sceglie SEMPRE la settimana da
+// esportare, poi due filtri indipendenti — chi includere (un'etichetta, es.
+// "Nazionale U16 TYT", "FC Giubiasco U15"...) e quale rosa di raduno usare
+// solo per i colori (Stato/Reparto), se il giocatore ci si trova dentro.
+function apriModalReportPresenze() {
   const root = document.getElementById("modal-root");
   if (!root) return;
-  if (!raduni.length) {
-    alert("Non hai ancora nessun raduno con una rosa. Creane uno da \"Raduni U16\" o \"Raduni FCL\" (con i giocatori assegnati a un reparto, e se vuoi anche uno stato colorato), poi da qui potrai esportare il report presenze incrociato con quella rosa.");
+
+  const settimane = tutteLeSettimanePresenze();
+  if (!settimane.length) {
+    alert("Non ci sono ancora partite ufficiali registrate: il report non ha nulla da esportare.");
     return;
   }
   const raduniOrdinati = raduni.slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
+  const tutteLeEtichetteExport = [...new Set([...ETICHETTE_DEFAULT, ...players.flatMap(p => p.etichette || [])])];
+  const settimanaIniziale = settimane.find(([key]) => key === settimanaApertaPresenze) ? settimanaApertaPresenze : settimane[0][0];
 
   root.innerHTML = `
-    <div class="modal-overlay" id="modal-overlay-esporta-presenze">
+    <div class="modal-overlay" id="modal-overlay-report-presenze">
       <div class="modal-box">
-        <button class="modal-close no-print" id="modal-close-esporta-presenze" title="Chiudi">✕</button>
-        <h2>Esporta report presenze</h2>
-        <p class="muted">Genera un Excel con il riepilogo dei giocatori di una rosa (colorato per stato di convocazione, come nella scheda del raduno) e il dettaglio partita per partita di questa settimana.</p>
-        <label class="full">Rosa di riferimento (per Stato / Reparto / Ruolo)
-          <select id="ep-raduno">
-            ${raduniOrdinati.map(r => `<option value="${r.id}">${esc(r.nome || "Raduno senza nome")}${r.dataInizio ? " — " + formatDataIt(r.dataInizio) : ""}</option>`).join("")}
+        <button class="modal-close no-print" id="modal-close-report-presenze" title="Chiudi">✕</button>
+        <h2>Report presenze</h2>
+        <p class="muted">Genera un Excel con il riepilogo dei giocatori e il dettaglio partita per partita di una settimana.</p>
+
+        <label class="full">Settimana
+          <select id="ep-settimana">
+            ${settimane.map(([key, s]) => `<option value="${esc(key)}" ${key === settimanaIniziale ? "selected" : ""}>${esc(formatRangeSettimana(s.lunedi, s.domenica))}</option>`).join("")}
           </select>
         </label>
+
+        <div class="import-subsection">
+          <h3>Giocatori da includere <span class="muted" style="font-weight:400;">(facoltativo — se non spunti nulla, entrano tutti quelli con almeno una partita quella settimana)</span></h3>
+          <div class="report-campi-grid">
+            ${tutteLeEtichetteExport.map(e => `
+              <label class="report-campo-check">
+                <input type="checkbox" class="ep-etichetta-check" value="${esc(e)}">
+                ${esc(e)}
+              </label>`).join("")}
+          </div>
+        </div>
+
+        <div class="import-subsection">
+          <h3>Colori (Stato / Reparto)</h3>
+          <label class="full">Rosa di riferimento per i colori <span class="muted" style="font-weight:400;">(facoltativo)</span>
+            <select id="ep-raduno">
+              <option value="">— Nessuno (nessun colore) —</option>
+              ${raduniOrdinati.map(r => `<option value="${r.id}">${esc(r.nome || "Raduno senza nome")}${r.dataInizio ? " — " + formatDataIt(r.dataInizio) : ""}</option>`).join("")}
+            </select>
+          </label>
+          <p class="muted" style="margin:6px 0 0;">Se scegli un raduno, i giocatori che si trovano nella sua rosa vengono colorati e valorizzati per Stato/Reparto come nella scheda del raduno; gli altri restano senza colore.</p>
+        </div>
+
         <div class="modal-actions">
           <button type="button" class="btn btn-primary" id="ep-genera">Genera Excel</button>
         </div>
       </div>
     </div>`;
 
-  document.getElementById("modal-close-esporta-presenze").onclick = () => { root.innerHTML = ""; };
-  document.getElementById("modal-overlay-esporta-presenze").onclick = e => { if (e.target.id === "modal-overlay-esporta-presenze") root.innerHTML = ""; };
+  document.getElementById("modal-close-report-presenze").onclick = () => { root.innerHTML = ""; };
+  document.getElementById("modal-overlay-report-presenze").onclick = e => { if (e.target.id === "modal-overlay-report-presenze") root.innerHTML = ""; };
+
   document.getElementById("ep-genera").onclick = async () => {
-    const radunoId = document.getElementById("ep-raduno").value;
-    await esportaReportPresenzeSettimana(key, radunoId);
+    const key = document.getElementById("ep-settimana").value;
+    const etichetteScelte = [...document.querySelectorAll(".ep-etichetta-check:checked")].map(el => el.value);
+    const radunoId = document.getElementById("ep-raduno").value || null;
+    await esportaReportPresenze(key, etichetteScelte, radunoId);
     root.innerHTML = "";
   };
 }
 
 // Genera l'Excel colorato del report presenze per la settimana `key`
-// (lunedì in formato ISO), incrociando la rosa del raduno scelto (Stato,
-// Reparto, Ruolo) con le partite ufficiali di ciascun giocatore in quella
-// settimana. Due fogli: "Riepilogo" (una riga per giocatore in rosa) e
+// (lunedì in formato ISO). Due fogli: "Riepilogo" (una riga per giocatore) e
 // "Partite" (una riga per ogni partita di quella settimana).
-async function esportaReportPresenzeSettimana(key, radunoId) {
-  const raduno = raduni.find(x => x.id === radunoId);
-  if (!raduno) { alert("Raduno non trovato."); return; }
+//  - etichetteScelte: se non vuoto, include solo chi ha almeno una di
+//    queste etichette; se vuoto, include chiunque abbia una partita quella
+//    settimana.
+//  - radunoId: se impostato, i giocatori trovati nella rosa di quel raduno
+//    prendono Stato/Reparto/colore da lì; tutti gli altri (in rosa o no)
+//    restano senza colore. Puramente un lookup, non filtra chi è incluso.
+async function esportaReportPresenze(key, etichetteScelte, radunoId) {
   if (typeof ExcelJS === "undefined") {
     alert("La libreria per l'esportazione colorata non è disponibile (offline e non ancora salvata in cache, oppure il file exceljs.min.js non è nella cartella dell'app). Riprova con internet attivo.");
     return;
   }
 
   const lunedi = new Date(key + "T00:00:00");
-  const domenica = domenicaSettimanaDi(lunedi);
-  const domenicaIso = isoLocale(domenica);
+  const domenicaPreview = domenicaSettimanaDi(lunedi);
+  const domenicaIsoPreview = isoLocale(domenicaPreview);
+
+  const raduno = radunoId ? raduni.find(x => x.id === radunoId) : null;
+  const rosaPerGiocatore = new Map();
+  if (raduno) {
+    repartiRaduno(raduno).forEach(rep => {
+      (raduno.rosa || []).filter(x => x.reparto === rep.id).forEach(voce => {
+        rosaPerGiocatore.set(voce.giocatoreId, { reparto: rep.nome || "", stato: voce.stato });
+      });
+    });
+  }
+
+  let giocatoriScelti;
+  if (etichetteScelte.length) {
+    giocatoriScelti = players.filter(p => (p.etichette || []).some(e => etichetteScelte.includes(e)));
+  } else {
+    giocatoriScelti = players.filter(p => (p.partiteUfficiali || []).some(m => m.data && m.data >= key && m.data <= domenicaIsoPreview));
+  }
+  giocatoriScelti = giocatoriScelti.slice().sort((a, b) => (a.cognome || "").localeCompare(b.cognome || "") || (a.nome || "").localeCompare(b.nome || ""));
+
+  if (!giocatoriScelti.length) {
+    alert("Nessun giocatore corrisponde ai filtri scelti per questa settimana.");
+    return;
+  }
+
+  const voci = giocatoriScelti.map(p => {
+    const inRosa = rosaPerGiocatore.get(p.id);
+    const statoInfo = inRosa ? statoLegenda(inRosa.stato) : null;
+    return {
+      giocatore: p,
+      statoNome: inRosa ? (statoInfo ? statoInfo.nome : "Non convocato") : "",
+      coloreArgb: inRosa ? coloreStatoArgb(inRosa.stato) : null,
+      reparto: inRosa ? inRosa.reparto : ""
+    };
+  });
+  const nomeFonte = etichetteScelte.length ? etichetteScelte.join(" + ") : (raduno ? raduno.nome : "Tutti");
+
+  const domenica = domenicaPreview;
+  const domenicaIso = domenicaIsoPreview;
   const etichettaSettimana = formatRangeSettimana(lunedi, domenica);
 
   const wb = new ExcelJS.Workbook();
@@ -8365,44 +8441,35 @@ async function esportaReportPresenzeSettimana(key, radunoId) {
   wsPartite.getRow(1).font = { bold: true };
   wsPartite.columns = intestazioniPartite.map(h => ({ width: Math.max(12, h.length + 2) }));
 
-  repartiRaduno(raduno).forEach(rep => {
-    const voci = (raduno.rosa || []).filter(x => x.reparto === rep.id);
-    voci.forEach(voce => {
-      const p = players.find(pl => pl.id === voce.giocatoreId);
-      if (!p) return;
+  voci.forEach(({ giocatore: p, statoNome, coloreArgb, reparto }) => {
+    const partiteSettimana = (p.partiteUfficiali || [])
+      .filter(m => m.data && m.data >= key && m.data <= domenicaIso)
+      .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
 
-      const partiteSettimana = (p.partiteUfficiali || [])
-        .filter(m => m.data && m.data >= key && m.data <= domenicaIso)
-        .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+    const titolare = partiteSettimana.filter(m => m.presenza === "Titolare").length;
+    const subentrato = partiteSettimana.filter(m => m.presenza === "Subentrato").length;
+    const panchina = partiteSettimana.filter(m => m.presenza === "Panchina (non entrato)").length;
+    const nonConvocato = partiteSettimana.filter(m => m.presenza === "Non convocato").length;
+    const minutiTotali = partiteSettimana.reduce((s, m) => s + (Number(m.minutiGiocati) || 0), 0);
+    const golTotali = partiteSettimana.reduce((s, m) => s + (Number(m.gol) || 0), 0);
 
-      const titolare = partiteSettimana.filter(m => m.presenza === "Titolare").length;
-      const subentrato = partiteSettimana.filter(m => m.presenza === "Subentrato").length;
-      const panchina = partiteSettimana.filter(m => m.presenza === "Panchina (non entrato)").length;
-      const nonConvocato = partiteSettimana.filter(m => m.presenza === "Non convocato").length;
-      const minutiTotali = partiteSettimana.reduce((s, m) => s + (Number(m.minutiGiocati) || 0), 0);
-      const golTotali = partiteSettimana.reduce((s, m) => s + (Number(m.gol) || 0), 0);
-      const statoInfo = statoLegenda(voce.stato);
+    const row = wsRiepilogo.addRow([
+      p.cognome || "", p.nome || "", p.squadra || "",
+      statoNome, reparto, p.ruoloPrimario || "",
+      partiteSettimana.length, titolare, subentrato, panchina, nonConvocato,
+      minutiTotali, golTotali, minutiTotali
+    ]);
+    if (coloreArgb) {
+      row.eachCell(cell => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: coloreArgb } }; });
+    }
 
-      const row = wsRiepilogo.addRow([
-        p.cognome || "", p.nome || "", p.squadra || "",
-        statoInfo ? statoInfo.nome : "Non convocato",
-        rep.nome || "", p.ruoloPrimario || "",
-        partiteSettimana.length, titolare, subentrato, panchina, nonConvocato,
-        minutiTotali, golTotali, minutiTotali
+    partiteSettimana.forEach(m => {
+      wsPartite.addRow([
+        etichettaSettimana, formatDataIt(m.data), p.cognome || "", p.nome || "",
+        m.squadra || "", m.avversario || "", m.risultato || "", m.competizione || "",
+        m.presenza || "", (m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? m.minutiGiocati : "",
+        m.gol || "", m.note || "", m.link || ""
       ]);
-      const colore = coloreStatoArgb(voce.stato);
-      if (colore) {
-        row.eachCell(cell => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colore } }; });
-      }
-
-      partiteSettimana.forEach(m => {
-        wsPartite.addRow([
-          etichettaSettimana, formatDataIt(m.data), p.cognome || "", p.nome || "",
-          m.squadra || "", m.avversario || "", m.risultato || "", m.competizione || "",
-          m.presenza || "", (m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? m.minutiGiocati : "",
-          m.gol || "", m.note || "", m.link || ""
-        ]);
-      });
     });
   });
 
@@ -8410,7 +8477,7 @@ async function esportaReportPresenzeSettimana(key, radunoId) {
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const slug = sanitizeNomeFile(`Presenze ${etichettaSettimana}`);
+  const slug = sanitizeNomeFile(`Presenze ${nomeFonte} ${etichettaSettimana}`);
   a.href = url;
   a.download = `${slug}.xlsx`;
   document.body.appendChild(a);
