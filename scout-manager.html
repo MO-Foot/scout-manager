@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 11:00</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 12:10 (CEST)</div>
         </div>
       </div>
     </header>
@@ -6504,6 +6504,125 @@ function parseCandidatiDocxTabella(html, scoutDefault, nomeFile) {
   return candidates;
 }
 
+/* Formato "raduno a squadre" (Word): prima riga del documento con titolo e
+   data ("Valutazioni giocatori raduno 1 DBA - 19.08.2026 Macolin"), poi per
+   ogni gruppo un paragrafo interamente in grassetto "SQUADRA N" seguito, per
+   ogni giocatore, da un paragrafo NON in grassetto "Cognome Nome - Ruolo
+   T=x, I=x, P=x, S=x POTENZIALE: X" (a volte "Non valutabile" al posto dei
+   voti, senza lettera di potenziale) e da uno o più paragrafi di commento
+   libero. Un voto puo' essere scritto come intervallo ("T=2.5/3"): lo
+   risolviamo con la media dei due estremi - e' l'unica lettura che non
+   scarta l'informazione ne' inventa un singolo numero preciso che il
+   documento non da' con certezza. */
+function parseCandidatiDocxRadunoSquadre(html, scoutDefault, nomeFile) {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+
+  // Solo i paragrafi DIRETTAMENTE nel flusso del documento (non quelli
+  // annidati in una tabella): il documento sorgente finisce spesso con una
+  // tabella riassuntiva ("RIASSUNTO") che contiene singoli cognomi in celle
+  // <p> — inclusa nella ricerca "querySelectorAll('p')" senza filtro,
+  // finirebbe incollata come rumore in coda al commento dell'ultimo
+  // giocatore valutato.
+  const paragrafi = [...container.querySelectorAll(":scope > p")]
+    .map(p => ({
+      bold: p.children.length === 1 && p.children[0].tagName === "STRONG" && p.textContent.trim() === p.children[0].textContent.trim(),
+      text: p.textContent.trim()
+    }))
+    .filter(p => p.text);
+  if (!paragrafi.length) return [];
+
+  const SQUADRA_RE = /^SQUADRA\s+\d+\s*$/i;
+  // Firma distintiva del formato: senza almeno un gruppo "SQUADRA N" in
+  // grassetto non e' questo, meglio restituire zero candidati che rischiare
+  // falsi positivi su un documento di un altro tipo.
+  if (!paragrafi.some(p => p.bold && SQUADRA_RE.test(p.text))) return [];
+
+  const RIGA_RE = /^(.+?)\s+[–-]\s+(.+?)\s+T\s*=\s*([\d.,\/]+)\s*,\s*I\s*=\s*([\d.,\/]+)\s*,\s*P\s*=\s*([\d.,\/]+)\s*,\s*S\s*=\s*([\d.,\/]+)\s*POTENZIALE\s*:?\s*([A-Z][+-]?)?\s*$/i;
+  const RIGA_NV_RE = /^(.+?)\s+[–-]\s+(.+?)\s+Non valutabile\s*$/i;
+
+  function risolviVoto(s) {
+    const parti = String(s || "").split("/").map(x => parseFloat(x.replace(",", ".")));
+    const validi = parti.filter(x => !isNaN(x));
+    if (!validi.length) return "";
+    const media = validi.reduce((a, b) => a + b, 0) / validi.length;
+    return String(Math.round(media * 100) / 100);
+  }
+
+  // Titolo/data/luogo: di norma sono nel titolo del documento (uno stile
+  // "Titolo 1/2/3" -> <h1>/<h2>/<h3> in mammoth), non in un <p> normale —
+  // per questo va cercato a parte, non come primo elemento di "paragrafi".
+  const titoloEl = container.querySelector(":scope > h1, :scope > h2, :scope > h3, :scope > h4");
+  const testoTitolo = (titoloEl ? titoloEl.textContent : paragrafi[0].text).trim();
+  let titoloRaduno = testoTitolo, dataVisionatura = "", luogoRaduno = "";
+  const headerMatch = testoTitolo.match(/^(.+?)\s*[–-]\s*(\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4})\s*(.*)$/);
+  if (headerMatch) {
+    titoloRaduno = headerMatch[1].trim();
+    dataVisionatura = normalizzaData(headerMatch[2]);
+    luogoRaduno = headerMatch[3].trim();
+  }
+  const contestoFilename = estraiContestoDaFilename(nomeFile || "");
+  if (!dataVisionatura) dataVisionatura = contestoFilename.dataVisionatura || "";
+  const scoutRisolto = scoutDefault || contestoFilename.scoutDaFilename || "";
+  const etichetteAuto = etichetteDaFilename(nomeFile);
+
+  let squadraCorrente = "";
+  const candidates = [];
+  let i = 0;
+  while (i < paragrafi.length) {
+    const p = paragrafi[i];
+    if (p.bold && SQUADRA_RE.test(p.text)) { squadraCorrente = p.text.trim(); i++; continue; }
+    if (p.bold) { i++; continue; } // altro testo in grassetto non riconosciuto (es. "RIASSUNTO" finale)
+
+    let m = p.text.match(RIGA_RE);
+    let nomeCompleto, ruolo;
+    const parametri = [];
+    if (m) {
+      nomeCompleto = m[1].trim();
+      ruolo = m[2].trim();
+      const voti = [m[3], m[4], m[5], m[6]].map(risolviVoto);
+      if (voti[0]) parametri.push({ label: "Tecnica", valore: voti[0] });
+      if (voti[1]) parametri.push({ label: "Intelligenza", valore: voti[1] });
+      if (voti[2]) parametri.push({ label: "Personalità", valore: voti[2] });
+      if (voti[3]) parametri.push({ label: "Speed", valore: voti[3] });
+      if (m[7]) parametri.push({ label: "Potenziale", valore: m[7] });
+    } else {
+      m = p.text.match(RIGA_NV_RE);
+      if (m) { nomeCompleto = m[1].trim(); ruolo = m[2].trim(); }
+    }
+    if (!m) { i++; continue; }
+    i++;
+
+    // Il commento e' il/i paragrafo/i successivo/i, fino al prossimo
+    // giocatore riconosciuto o al prossimo gruppo "SQUADRA".
+    const commentoParti = [];
+    while (i < paragrafi.length) {
+      const pn = paragrafi[i];
+      if (pn.bold && SQUADRA_RE.test(pn.text)) break;
+      if (RIGA_RE.test(pn.text) || RIGA_NV_RE.test(pn.text)) break;
+      if (!pn.bold) commentoParti.push(pn.text);
+      i++;
+    }
+    const notaScritta = commentoParti.join(" ").replace(/\s+/g, " ").trim();
+
+    const { cognome, nome } = splitNomeCognome(nomeCompleto);
+    candidates.push({
+      cognome, nome,
+      dataNascita: "",
+      squadra: "",
+      ruoloPrimario: ruolo,
+      dataVisionatura,
+      partitaInfo: `${titoloRaduno}${luogoRaduno ? " - " + luogoRaduno : ""}${squadraCorrente ? " - " + squadraCorrente : ""}`,
+      scoutAutore: scoutRisolto,
+      etichetteAuto,
+      parametri,
+      notaScritta,
+      _raw: `[${nomeFile}] ${nomeCompleto} - ${ruolo} - ${squadraCorrente || "nessun gruppo"}`
+    });
+  }
+  return candidates;
+}
+
 /* Formato libero osservato: un paragrafo interamente in grassetto con il
    nome della squadra ("FC Lugano"), seguito per ogni giocatore da un
    paragrafo interamente in grassetto "Cognome [Nome] (AAAA) T=x, I=x,
@@ -7069,6 +7188,7 @@ function renderImport(content) {
         } else if (estensione === "docx") {
           const html = await estraiHtmlDocx(file);
           let trovati = parseCandidatiDocxTabella(html, scoutDefault, file.name);
+          if (!trovati.length) trovati = parseCandidatiDocxRadunoSquadre(html, scoutDefault, file.name);
           if (!trovati.length) trovati = parseCandidatiDocx(html, scoutDefault, file.name);
           if (!trovati.length) trovati = parseCandidatiDocxNazionale(html, scoutDefault, file.name);
           if (!trovati.length) trovati = parseCandidatiDocxNarrativo(html, scoutDefault, file.name);
@@ -8076,7 +8196,10 @@ function renderPresenze(content) {
             <strong>Settimana ${formatRangeSettimana(sett.lunedi, sett.domenica)}</strong>
             <span class="muted" style="font-size:12.5px;">${giocatoriCoinvolti} giocator${giocatoriCoinvolti === 1 ? "e coinvolto" : "i coinvolti"}${competizioniSettimana.length ? " — " + competizioniSettimana.map(c => esc(c)).join(", ") : ""}</span>
           </div>
-          <span class="presenze-chevron">▶</span>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button type="button" class="btn btn-ghost btn-sm no-print" data-esporta-settimana="${esc(key)}" title="Esporta un Excel con il riepilogo (colorato per stato di convocazione) e il dettaglio partite di questa settimana, incrociati con la rosa di un raduno">📊 Esporta Excel</button>
+            <span class="presenze-chevron">▶</span>
+          </div>
         </summary>
         <div class="presenze-settimana-body">
           <table class="tabella-giocatori tabella-presenze">
@@ -8147,6 +8270,153 @@ function renderPresenze(content) {
   content.querySelectorAll(".tabella-presenze tr[data-id]").forEach(tr => {
     tr.onclick = () => apriDettaglio(tr.dataset.id);
   });
+
+  content.querySelectorAll("[data-esporta-settimana]").forEach(btn => {
+    btn.onclick = (e) => {
+      // Il bottone vive dentro un <summary>: senza preventDefault/stopPropagation
+      // il click aprirebbe/chiuderebbe anche la settimana invece di limitarsi
+      // ad aprire la modale di esportazione.
+      e.preventDefault();
+      e.stopPropagation();
+      apriModalEsportaPresenzeSettimana(btn.dataset.esportaSettimana);
+    };
+  });
+}
+
+// Colore ARGB (per ExcelJS) dello stato di un giocatore in rosa a un raduno —
+// stessa legenda/colori usati nella schermata del raduno e nell'esportazione
+// Kaderliste ufficiale, così il colpo d'occhio resta coerente in tutta l'app.
+// A differenza di kaderlisteColoreStato (limitata agli stati con un
+// corrispettivo ufficiale nel modello federale), qui coloriamo TUTTI gli
+// stati della legenda, "Kader A" e "Sonstiges" compresi.
+function coloreStatoArgb(chiave) {
+  const s = statoLegenda(chiave);
+  if (!s) return null;
+  return "FF" + s.colore.replace("#", "").toUpperCase();
+}
+
+// Modale per scegliere quale rosa di raduno usare come riferimento
+// (Stato/Reparto/Ruolo) prima di generare il report presenze di una
+// settimana — la stessa settimana espansa/collassata nell'elenco.
+function apriModalEsportaPresenzeSettimana(key) {
+  const root = document.getElementById("modal-root");
+  if (!root) return;
+  if (!raduni.length) {
+    alert("Non hai ancora nessun raduno con una rosa. Creane uno da \"Raduni U16\" o \"Raduni FCL\" (con i giocatori assegnati a un reparto, e se vuoi anche uno stato colorato), poi da qui potrai esportare il report presenze incrociato con quella rosa.");
+    return;
+  }
+  const raduniOrdinati = raduni.slice().sort((a, b) => (b.dataInizio || "").localeCompare(a.dataInizio || ""));
+
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay-esporta-presenze">
+      <div class="modal-box">
+        <button class="modal-close no-print" id="modal-close-esporta-presenze" title="Chiudi">✕</button>
+        <h2>Esporta report presenze</h2>
+        <p class="muted">Genera un Excel con il riepilogo dei giocatori di una rosa (colorato per stato di convocazione, come nella scheda del raduno) e il dettaglio partita per partita di questa settimana.</p>
+        <label class="full">Rosa di riferimento (per Stato / Reparto / Ruolo)
+          <select id="ep-raduno">
+            ${raduniOrdinati.map(r => `<option value="${r.id}">${esc(r.nome || "Raduno senza nome")}${r.dataInizio ? " — " + formatDataIt(r.dataInizio) : ""}</option>`).join("")}
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-primary" id="ep-genera">Genera Excel</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("modal-close-esporta-presenze").onclick = () => { root.innerHTML = ""; };
+  document.getElementById("modal-overlay-esporta-presenze").onclick = e => { if (e.target.id === "modal-overlay-esporta-presenze") root.innerHTML = ""; };
+  document.getElementById("ep-genera").onclick = async () => {
+    const radunoId = document.getElementById("ep-raduno").value;
+    await esportaReportPresenzeSettimana(key, radunoId);
+    root.innerHTML = "";
+  };
+}
+
+// Genera l'Excel colorato del report presenze per la settimana `key`
+// (lunedì in formato ISO), incrociando la rosa del raduno scelto (Stato,
+// Reparto, Ruolo) con le partite ufficiali di ciascun giocatore in quella
+// settimana. Due fogli: "Riepilogo" (una riga per giocatore in rosa) e
+// "Partite" (una riga per ogni partita di quella settimana).
+async function esportaReportPresenzeSettimana(key, radunoId) {
+  const raduno = raduni.find(x => x.id === radunoId);
+  if (!raduno) { alert("Raduno non trovato."); return; }
+  if (typeof ExcelJS === "undefined") {
+    alert("La libreria per l'esportazione colorata non è disponibile (offline e non ancora salvata in cache, oppure il file exceljs.min.js non è nella cartella dell'app). Riprova con internet attivo.");
+    return;
+  }
+
+  const lunedi = new Date(key + "T00:00:00");
+  const domenica = domenicaSettimanaDi(lunedi);
+  const domenicaIso = isoLocale(domenica);
+  const etichettaSettimana = formatRangeSettimana(lunedi, domenica);
+
+  const wb = new ExcelJS.Workbook();
+
+  const wsRiepilogo = wb.addWorksheet("Riepilogo");
+  const intestazioniRiepilogo = ["Cognome", "Nome", "Squadra", "Stato", "Reparto", "Ruolo", "Partite", "Titolare", "Subentrato", "Panchina", "Non convocato", "Minuti totali", "Gol", `Min. ${etichettaSettimana}`];
+  wsRiepilogo.addRow(intestazioniRiepilogo);
+  wsRiepilogo.getRow(1).font = { bold: true };
+  wsRiepilogo.columns = intestazioniRiepilogo.map(h => ({ width: Math.max(14, h.length + 2) }));
+
+  const wsPartite = wb.addWorksheet("Partite");
+  const intestazioniPartite = ["Settimana", "Data", "Cognome", "Nome", "Squadra", "Avversario", "Risultato", "Competizione", "Presenza", "Minuti", "Gol", "Note", "Link"];
+  wsPartite.addRow(intestazioniPartite);
+  wsPartite.getRow(1).font = { bold: true };
+  wsPartite.columns = intestazioniPartite.map(h => ({ width: Math.max(12, h.length + 2) }));
+
+  repartiRaduno(raduno).forEach(rep => {
+    const voci = (raduno.rosa || []).filter(x => x.reparto === rep.id);
+    voci.forEach(voce => {
+      const p = players.find(pl => pl.id === voce.giocatoreId);
+      if (!p) return;
+
+      const partiteSettimana = (p.partiteUfficiali || [])
+        .filter(m => m.data && m.data >= key && m.data <= domenicaIso)
+        .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+
+      const titolare = partiteSettimana.filter(m => m.presenza === "Titolare").length;
+      const subentrato = partiteSettimana.filter(m => m.presenza === "Subentrato").length;
+      const panchina = partiteSettimana.filter(m => m.presenza === "Panchina (non entrato)").length;
+      const nonConvocato = partiteSettimana.filter(m => m.presenza === "Non convocato").length;
+      const minutiTotali = partiteSettimana.reduce((s, m) => s + (Number(m.minutiGiocati) || 0), 0);
+      const golTotali = partiteSettimana.reduce((s, m) => s + (Number(m.gol) || 0), 0);
+      const statoInfo = statoLegenda(voce.stato);
+
+      const row = wsRiepilogo.addRow([
+        p.cognome || "", p.nome || "", p.squadra || "",
+        statoInfo ? statoInfo.nome : "Non convocato",
+        rep.nome || "", p.ruoloPrimario || "",
+        partiteSettimana.length, titolare, subentrato, panchina, nonConvocato,
+        minutiTotali, golTotali, minutiTotali
+      ]);
+      const colore = coloreStatoArgb(voce.stato);
+      if (colore) {
+        row.eachCell(cell => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colore } }; });
+      }
+
+      partiteSettimana.forEach(m => {
+        wsPartite.addRow([
+          etichettaSettimana, formatDataIt(m.data), p.cognome || "", p.nome || "",
+          m.squadra || "", m.avversario || "", m.risultato || "", m.competizione || "",
+          m.presenza || "", (m.minutiGiocati !== null && m.minutiGiocati !== undefined) ? m.minutiGiocati : "",
+          m.gol || "", m.note || "", m.link || ""
+        ]);
+      });
+    });
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const slug = sanitizeNomeFile(`Presenze ${etichettaSettimana}`);
+  a.href = url;
+  a.download = `${slug}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderStrumenti(content) {
