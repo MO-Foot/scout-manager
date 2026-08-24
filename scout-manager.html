@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:05 (CEST)</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:25 (CEST)</div>
         </div>
       </div>
     </header>
@@ -8272,6 +8272,44 @@ function renderPresenze(content) {
   document.getElementById("btn-report-presenze").onclick = apriModalReportPresenze;
 }
 
+// Ordine dei ruoli per l'export presenze (chiesto esplicitamente): portieri,
+// poi la difesa letta da sinistra a destra (esterno sinistro, centrale
+// sinistro, centrale destro, esterno destro), poi centrocampisti, ali,
+// trequartisti, attaccanti. Lavora per parole chiave sul testo libero di
+// ruoloPrimario (non solo sui valori esatti di RUOLI, che nei dati reali
+// arrivano anche da importazioni/raduni con dicitura leggermente diversa,
+// es. "Difesa laterale destra" invece di "Terzino destro").
+function rangoRuoloExport(ruolo) {
+  if (!ruolo) return 99;
+  const r = ruolo.toLowerCase();
+  const sx = /sinistr/.test(r) || /\bsx\b/.test(r);
+  const dx = /destr/.test(r) || /\bdx\b/.test(r);
+
+  if (r.includes("portiere") || r.includes("torwart") || r.includes("gardien")) return 0;
+
+  // Difensore centrale (sinistro/destro) — se il lato non è specificato lo
+  // mettiamo comunque tra i due (2.5), invece di perderlo in fondo.
+  if (r.includes("difensore central") || r.includes("centrale difens") || (r.includes("central") && r.includes("difes"))) {
+    return sx ? 2 : (dx ? 3 : 2.5);
+  }
+
+  // Terzino / esterno basso / difesa laterale = fascia difensiva.
+  if (r.includes("terzino") || r.includes("difesa laterale") || r.includes("esterno basso")) {
+    return sx ? 1 : (dx ? 4 : 2.5);
+  }
+
+  // Ala / esterno alto = fascia offensiva, va DOPO i centrocampisti.
+  if (/\bala\b/.test(r) || r.includes("esterno alto") || r.includes("esterno offensiv")) return 6;
+
+  if (r.includes("trequartista") || r.includes("fantasista")) return 7;
+
+  if (r.includes("punta") || r.includes("attacc") || r.includes("centravanti")) return 8;
+
+  if (r.includes("centrocamp") || r.includes("median") || r.includes("mezzala") || r.includes("regista") || r.includes("playmaker") || r.includes("interno medio") || r.includes("incontrista")) return 5;
+
+  return 99;
+}
+
 // Colore ARGB (per ExcelJS) dello stato di un giocatore in rosa a un raduno —
 // stessa legenda/colori usati nella schermata del raduno e nell'esportazione
 // Kaderliste ufficiale, così il colpo d'occhio resta coerente in tutta l'app.
@@ -8404,7 +8442,11 @@ async function esportaReportPresenze(key, etichetteScelte, radunoId) {
   } else {
     giocatoriScelti = players.filter(p => (p.partiteUfficiali || []).some(m => m.data && m.data >= key && m.data <= domenicaIsoPreview));
   }
-  giocatoriScelti = giocatoriScelti.slice().sort((a, b) => (a.cognome || "").localeCompare(b.cognome || "") || (a.nome || "").localeCompare(b.nome || ""));
+  giocatoriScelti = giocatoriScelti.slice().sort((a, b) =>
+    rangoRuoloExport(a.ruoloPrimario) - rangoRuoloExport(b.ruoloPrimario) ||
+    (a.cognome || "").localeCompare(b.cognome || "") ||
+    (a.nome || "").localeCompare(b.nome || "")
+  );
 
   if (!giocatoriScelti.length) {
     alert("Nessun giocatore corrisponde ai filtri scelti per questa settimana.");
@@ -8441,7 +8483,25 @@ async function esportaReportPresenze(key, etichetteScelte, radunoId) {
   wsPartite.getRow(1).font = { bold: true };
   wsPartite.columns = intestazioniPartite.map(h => ({ width: Math.max(12, h.length + 2) }));
 
+  const ETICHETTA_RANGO_RUOLO = {
+    0: "PORTIERI", 1: "ESTERNI SINISTRI", 2: "CENTRALI SINISTRI", 2.5: "DIFESA (LATO NON SPECIFICATO)",
+    3: "CENTRALI DESTRI", 4: "ESTERNI DESTRI", 5: "CENTROCAMPISTI", 6: "ALI",
+    7: "TREQUARTISTI", 8: "ATTACCANTI", 99: "RUOLO NON SPECIFICATO"
+  };
+  let ultimoRangoRuolo = null;
+
   voci.forEach(({ giocatore: p, statoNome, coloreArgb, reparto }) => {
+    const rangoRuolo = rangoRuoloExport(p.ruoloPrimario);
+    if (rangoRuolo !== ultimoRangoRuolo) {
+      const rigaGruppo = wsRiepilogo.addRow([ETICHETTA_RANGO_RUOLO[rangoRuolo] || "ALTRO"]);
+      wsRiepilogo.mergeCells(rigaGruppo.number, 1, rigaGruppo.number, intestazioniRiepilogo.length);
+      rigaGruppo.eachCell({ includeEmpty: true }, cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2A2A2A" } };
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      });
+      ultimoRangoRuolo = rangoRuolo;
+    }
+
     const partiteSettimana = (p.partiteUfficiali || [])
       .filter(m => m.data && m.data >= key && m.data <= domenicaIso)
       .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
