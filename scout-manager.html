@@ -1430,7 +1430,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:25 (CEST)</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:35 (CEST)</div>
         </div>
       </div>
     </header>
@@ -2723,7 +2723,7 @@ function graficoMirwaldSVG(player, { width = 560, height = 240 } = {}) {
   let etichetteX = "";
   misurazioni.forEach(m => {
     const x = xFor(new Date(m.data).getTime());
-    etichetteX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${formatDataIt(m.data).slice(0, 5)}</text>`;
+    etichetteX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${formatDataIt(m.data)}</text>`;
   });
 
   // linea rossa di soglia (Grenzwerte)
