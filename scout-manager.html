@@ -6851,7 +6851,10 @@ function parseCandidati(text, nomeFile) {
   const idRe = /^\d{5,}$/;
   const jerseyRe = /^\d{1,2}$/;
   const ratingRe = /^\d[.,]\d{1,2}$/;
-  const dateRe = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})$/;
+  // Alcuni export più recenti aggiungono un suffisso dopo la data di nascita
+  // (es. "11.04.2010, HTP"): lo tolleriamo senza cambiare cosa viene estratto
+  // come data (normalizzaData prende comunque solo i tre numeri).
+  const dateRe = /^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})(?:\s*,\s*\S+)?$/;
   const RATING_LABELS = ["Tecnica", "Intelligenza", "Personalità", "Speed", "Media Tips", "Voto extra", "Nota partita"];
 
   // Pattern condivisi tra le lingue viste finora nei report ClubCorner/ASF
@@ -6873,12 +6876,16 @@ function parseCandidati(text, nomeFile) {
   // commento comincia sulla pagina successiva verrebbe scartato perché
   // l'intestazione ripetuta si infila tra il voto e la parola "Commento".
   const FURNITURE_EXACT = new Set([
-    "N° pass.", "Giocatori", "Posizione sul", "terreno", "N°", "T", "I", "P", "S", "ø", "S.V.", "Nota",
+    "N° pass.", "Giocatori", "Posizione sul", "terreno", "Posizione sul terreno", "Mirwald", "N°", "T", "I", "P", "S", "ø", "S.V.", "Nota",
     "Impiego Scouting (Torneo)", "Impiego Scouting (Partita)",
-    "N° passe", "Joueur", "Position durant", "le match", "D.B.", "Note",
+    "N° passe", "Joueur", "Position durant", "le match", "Position durant le match", "D.B.", "Note",
     "Engagement Scouting (Match)",
     "Pass Nr", "Spieler", "Spielposition", "RN", "B.E.",
-    "Scouting-Bericht (Spiel)", "Startformation", "Ersatz"
+    "Scouting-Bericht (Spiel)", "Startformation", "Ersatz",
+    // Etichette dei due pulsanti/tab sopra ogni lista giocatori: a volte in
+    // un export compaiono come righe di testo proprie invece che restare
+    // dentro il pulsante, quindi le togliamo come le altre righe di arredo.
+    "Giocatori titolari", "Reserva", "Joueurs titulaires", "Remplaçants"
   ]);
   const lines = (text || "").split("\n").map(l => l.trim())
     .filter(Boolean)
@@ -6960,9 +6967,14 @@ function parseCandidati(text, nomeFile) {
     if (teamMatch) { squadraCorrente = teamMatch[1].trim(); dentroRoster = true; i++; continue; }
 
     if (dentroRoster && idRe.test(line)) {
-      const passaporto = line;
+      let passaporto = line;
       i++;
       if (lines[i] === "C") i++; // marcatore capitano
+      // Alcuni export più recenti spezzano il numero tessera su due righe
+      // (es. "117094" + "5" invece di "1170945"): se subito dopo troviamo
+      // un'altra riga numerica corta, è la coda dello stesso numero, non
+      // l'inizio del nome (che non comincia mai con sole cifre).
+      if (i < lines.length && jerseyRe.test(lines[i])) { passaporto += lines[i]; i++; }
 
       const nomeParti = [];
       while (i < lines.length && !dateRe.test(lines[i]) && !idRe.test(lines[i])) {
