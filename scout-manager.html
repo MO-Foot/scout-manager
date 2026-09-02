@@ -248,6 +248,23 @@ body{
   max-height: 220px;
   overflow-y: auto;
 }
+/* #chips-etichette e #chips-scout non sono più loro stessi un .chips-group
+   (dalla vista raggruppata in poi possono contenere più gruppi/sotto-liste),
+   quindi il contenitore scrollabile va applicato qui invece che sopra: */
+#chips-etichette, #chips-scout{
+  padding: 4px 12px 12px;
+  border-top: 1px dashed var(--line);
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* i .chips-group annidati dentro ai singoli gruppi di etichette non devono
+   avere un loro scroll/bordo separato: scrolla solo il contenitore esterno */
+#chips-etichette .chips-group{
+  padding: 0;
+  border-top: none;
+  max-height: none;
+  overflow: visible;
+}
 .filtri-chips-row{
   display: flex;
   align-items: center;
