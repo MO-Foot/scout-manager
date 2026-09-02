@@ -339,6 +339,17 @@ body{
   border-radius: 6px;
   font-size: 13px;
 }
+.etichette-gruppi{ display: flex; flex-direction: column; gap: 10px; }
+.etichette-gruppo{ display: flex; flex-direction: column; gap: 5px; }
+.etichette-gruppo-titolo{
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.etichette-gruppo-altro .etichette-gruppo-titolo{ font-style: italic; }
 
 /* ---------- File status bar ---------- */
 .file-status-bar{
@@ -1494,6 +1505,12 @@ const ANNO_RIFERIMENTO_STAGIONE = 2027;
 const ETICHETTE_DEFAULT = [
   "Nazionale U16 TYT (2011)",
   "Nazionale U16 A (2011)",
+  "Nazionale U16 (2011) › TYT › Raduno 1",
+  "Nazionale U16 (2011) › TYT › Raduno 2",
+  "Nazionale U16 (2011) › TYT › Raduno 3",
+  "Nazionale U16 (2011) › TYT › Raduno 4",
+  "Nazionale U16 (2011) › TYT › Raduno 5",
+  "Nazionale U16 (2011) › TYT › Raduno 6",
   "FOOTURO",
   "Candidato FOOTURO",
   "FC Lugano U15",
@@ -1507,6 +1524,107 @@ const ETICHETTE_DEFAULT = [
   "Nazionale U21",
   "Nazionale A"
 ];
+
+// ===================== Etichette: raggruppamento gerarchico =====================
+// Le etichette nuove usano la convenzione "Gruppo › Sotto-etichetta" (es.
+// "Nazionale U16 (2011) › TYT › Raduno 1"): la vista le raggruppa
+// automaticamente sotto il testo che precede la prima "›". Le etichette
+// storiche — già assegnate a dei giocatori PRIMA che questa convenzione
+// esistesse, es. "Nazionale U16 TYT (2011)" o "Raduno 1 U17" — vengono
+// riconosciute e raggruppate a loro volta tramite le regole qui sotto, SENZA
+// essere rinominate: restano scritte esattamente come sono nei dati, cambia
+// solo come vengono presentate nell'elenco/nella scheda. Se manca una regola
+// per un'etichetta esistente, questa finisce nel gruppo "Altro" — non sparisce
+// mai. Aggiungendo nuove etichette da qui in avanti, usa la convenzione con
+// "›" invece di aggiungere nuove regole qui sotto.
+const SEP_GERARCHIA = " › ";
+const GRUPPI_ETICHETTE_LEGACY = [
+  { re: /^Nazionale U(\d+) TYT \((\d+)\)$/, gruppo: m => `Nazionale U${m[1]} (${m[2]})`, sotto: m => `TYT (${m[2]})` },
+  { re: /^Nazionale U(\d+) A \((\d+)\)$/, gruppo: m => `Nazionale U${m[1]} (${m[2]})`, sotto: m => `Kader A (${m[2]})` },
+  { re: /^Nazionale U(\d+) Kader A \((\d+)\)$/, gruppo: m => `Nazionale U${m[1]} (${m[2]})`, sotto: m => `Kader A (${m[2]})` },
+  { re: /^Nazionale U(\d+) TYT$/, gruppo: m => `Nazionale U${m[1]}`, sotto: () => `TYT` },
+  { re: /^Nazionale U(\d+) \((\d+)\)$/, gruppo: m => `Nazionale U${m[1]} (${m[2]})`, sotto: () => null },
+  { re: /^Nazionale U(\d+)$/, gruppo: m => `Nazionale U${m[1]}`, sotto: () => null },
+  { re: /^Raduno (\d+) U(\d+)$/, gruppo: m => `Nazionale U${m[2]}`, sotto: m => `Raduno ${m[1]}` },
+  { re: /^Nazionale A$/, gruppo: () => `Nazionale A`, sotto: () => null },
+  { re: /^FOOTURO$/, gruppo: () => `FOOTURO`, sotto: () => `Attuali` },
+  { re: /^Candidato FOOTURO$/, gruppo: () => `FOOTURO`, sotto: () => `Candidato` },
+  { re: /^FC Lugano U15$/, gruppo: () => `Partenariato Ticino`, sotto: () => `FC Lugano U15` },
+  { re: /^FC Giubiasco U15$/, gruppo: () => `Partenariato Ticino`, sotto: () => `FC Giubiasco U15` }
+];
+
+// Data un'etichetta (stringa), restituisce {gruppo, sotto} per la vista
+// raggruppata. "sotto" è il testo mostrato dentro al gruppo; se null,
+// l'etichetta stessa è mostrata come voce diretta del gruppo (non ha una vera
+// sotto-etichetta, es. "Nazionale U21"). Se "gruppo" è null, l'etichetta non è
+// riconosciuta e finisce nel gruppo "Altro".
+function gruppoEtichetta(e) {
+  if (e.includes(SEP_GERARCHIA)) {
+    const parti = e.split(SEP_GERARCHIA);
+    return { gruppo: parti[0], sotto: parti.slice(1).join(SEP_GERARCHIA) };
+  }
+  for (const regola of GRUPPI_ETICHETTE_LEGACY) {
+    const m = regola.re.exec(e);
+    if (m) return { gruppo: regola.gruppo(m), sotto: regola.sotto(m) };
+  }
+  return { gruppo: null, sotto: null };
+}
+
+// Ordine di priorità dei gruppi nella vista: i gruppi "Nazionale UNN" per
+// categoria crescente (U14 prima di U15…) e, a parità di categoria, annata più
+// recente prima; FOOTURO e Partenariato Ticino subito dopo il gruppo U16
+// corrente; il resto in ordine alfabetico; "Altro" sempre in fondo.
+function ordinePrioritaGruppo(titolo) {
+  if (titolo === "Altro") return [9, 0, 0, titolo];
+  if (titolo === "FOOTURO") return [1, 0, 0, titolo];
+  if (titolo === "Partenariato Ticino") return [2, 0, 0, titolo];
+  if (titolo === "Nazionale A") return [0, 99, 0, titolo];
+  const m = /^Nazionale U(\d+)(?:\s*\((\d+)\))?$/.exec(titolo);
+  if (m) return [0, parseInt(m[1], 10), -(parseInt(m[2] || "0", 10)), titolo];
+  return [5, 0, 0, titolo];
+}
+
+// Raggruppa un elenco (già filtrato/ordinato a monte) di etichette-stringa in
+// [{titolo, voci:[{val, testo}]}] pronto per il rendering a chips. L'ordine
+// delle "voci" dentro ogni gruppo rispetta l'ordine dell'elenco originale.
+// Se assicuraAltro è true, il gruppo "Altro" è sempre presente (anche vuoto)
+// — serve nella scheda giocatore per avere un posto dove aggiungere le
+// etichette personalizzate scritte a mano.
+function raggruppaEtichette(elenco, assicuraAltro) {
+  const mappa = new Map();
+  for (const val of elenco) {
+    const { gruppo, sotto } = gruppoEtichetta(val);
+    const titolo = gruppo || "Altro";
+    const testo = sotto || val;
+    if (!mappa.has(titolo)) mappa.set(titolo, []);
+    mappa.get(titolo).push({ val, testo });
+  }
+  if (assicuraAltro && !mappa.has("Altro")) mappa.set("Altro", []);
+  const gruppi = [...mappa.entries()].map(([titolo, voci]) => ({ titolo, voci }));
+  gruppi.sort((a, b) => {
+    const pa = ordinePrioritaGruppo(a.titolo), pb = ordinePrioritaGruppo(b.titolo);
+    for (let i = 0; i < pa.length; i++) {
+      if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+    }
+    return 0;
+  });
+  return gruppi;
+}
+
+// Rendering HTML condiviso: elenco di etichette-stringa -> chips raggruppate.
+// selezionati: Set delle etichette attive (evidenziate). assicuraAltro: vedi
+// sopra. wrapperClass: classe extra sul contenitore esterno (facoltativa).
+function renderChipsEtichetteRaggruppate(elenco, selezionati, assicuraAltro) {
+  const sel = selezionati || new Set();
+  const gruppi = raggruppaEtichette(elenco, assicuraAltro);
+  return `<div class="etichette-gruppi">${gruppi.map(g => `
+    <div class="etichette-gruppo${g.titolo === "Altro" ? " etichette-gruppo-altro" : ""}">
+      <div class="etichette-gruppo-titolo">${esc(g.titolo)}</div>
+      <div class="chips-group">
+        ${g.voci.map(v => `<button type="button" class="chip ${sel.has(v.val) ? "chip-active" : ""}" data-val="${esc(v.val)}">${esc(v.testo)}</button>`).join("")}
+      </div>
+    </div>`).join("")}</div>`;
+}
 
 // Riconosce sigle nel nome del file (es. "...U16TYT2010...",
 // "...FOOTURO...") e le traduce nelle etichette corrispondenti. "Candidato
@@ -4346,9 +4464,14 @@ function renderElenco(content) {
     <div class="filtri-dropdown-row">
       <details class="filtro-dropdown">
         <summary>Etichetta${filtroEtichette.size ? ` (${filtroEtichette.size})` : ""}</summary>
-        <div class="chips-group" id="chips-etichette">
-          ${etichetteTutte.map(e => `<button type="button" class="chip ${filtroEtichette.has(e) ? "chip-active" : ""}" data-val="${esc(e)}">${esc(e)}</button>`).join("")}
-          ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
+        <div id="chips-etichette">
+          ${renderChipsEtichetteRaggruppate(etichetteTutte, filtroEtichette, false)}
+          <div class="etichette-gruppo" style="margin-top:10px;">
+            <div class="etichette-gruppo-titolo">Categoria</div>
+            <div class="chips-group">
+              ${CATEGORIE_FISSE.map(c => `<button type="button" class="chip chip-categoria ${filtroEtichette.has(c) ? "chip-active" : ""}" data-val="${esc(c)}" title="Categoria">${esc(c)}</button>`).join("")}
+            </div>
+          </div>
         </div>
       </details>
       <details class="filtro-dropdown">
@@ -5690,8 +5813,8 @@ function renderForm(content, p) {
 
       <div class="dyn-section">
         <div class="dyn-section-header"><h3>Etichette</h3></div>
-        <div class="chips-group" id="fp-etichette-chips">
-          ${etichetteEsistenti.map(e => `<button type="button" class="chip ${etichetteSelezionate.has(e) ? "chip-active" : ""}" data-val="${esc(e)}">${esc(e)}</button>`).join("")}
+        <div id="fp-etichette-chips">
+          ${renderChipsEtichetteRaggruppate(etichetteEsistenti, etichetteSelezionate, true)}
         </div>
         <div class="etichetta-add-row">
           <input type="text" id="fp-nuova-etichetta" placeholder="Nuova etichetta personalizzata">
@@ -5841,8 +5964,8 @@ function renderForm(content, p) {
     const input = document.getElementById("fp-nuova-etichetta");
     const val = input.value.trim();
     if (!val) return;
-    const chipsGroup = document.getElementById("fp-etichette-chips");
-    const esistente = [...chipsGroup.querySelectorAll(".chip")].find(c => c.dataset.val.toLowerCase() === val.toLowerCase());
+    const chipsWrap = document.getElementById("fp-etichette-chips");
+    const esistente = [...chipsWrap.querySelectorAll(".chip")].find(c => c.dataset.val.toLowerCase() === val.toLowerCase());
     if (esistente) {
       esistente.classList.add("chip-active");
     } else {
@@ -5852,7 +5975,11 @@ function renderForm(content, p) {
       chip.dataset.val = val;
       chip.textContent = val;
       chip.onclick = () => chip.classList.toggle("chip-active");
-      chipsGroup.appendChild(chip);
+      // Le nuove etichette scritte a mano finiscono nel gruppo "Altro" (creato
+      // sempre, anche vuoto, da renderChipsEtichetteRaggruppate con
+      // assicuraAltro=true più sopra).
+      const gruppoAltro = chipsWrap.querySelector(".etichette-gruppo-altro .chips-group");
+      (gruppoAltro || chipsWrap).appendChild(chip);
     }
     input.value = "";
   };
@@ -7848,6 +7975,44 @@ function rimuoviEtichetta(etichetta) {
   return conteggio;
 }
 
+// Applica un'etichetta a tutti i giocatori presenti nella rosa di un raduno
+// (raduni.rosa: [{giocatoreId, reparto, stato}]) — a prescindere dallo stato
+// (convocato/pikett/infortunato/rinuncia): l'etichetta indica "è stato
+// convocato a questo raduno", non "ha giocato". Ritorna quanti giocatori
+// l'hanno ricevuta per la prima volta (chi la aveva già non viene ricontato).
+function applicaEtichettaARosaRaduno(raduno, etichetta) {
+  if (!raduno || !etichetta) return 0;
+  let conteggio = 0;
+  (raduno.rosa || []).forEach(voce => {
+    const p = players.find(pl => pl.id === voce.giocatoreId);
+    if (!p) return;
+    p.etichette = p.etichette || [];
+    if (p.etichette.includes(etichetta)) return;
+    p.etichette.push(etichetta);
+    conteggio++;
+  });
+  return conteggio;
+}
+
+// Suggerisce un'etichetta di partenza a partire dal nome del raduno (es.
+// "Raduno 1 TYT" -> "Nazionale U16 (2011) › TYT › Raduno 1"). È solo un
+// punto di partenza mostrato in un campo modificabile: i nomi dei raduni non
+// seguono uno schema fisso al 100%, quindi resta sempre da controllare prima
+// di applicare.
+function etichettaSuggeritaDaRaduno(nomeRaduno) {
+  const nome = nomeRaduno || "";
+  let m = /^Raduno\s+(\d+)\s+TYT$/i.exec(nome);
+  if (m) return `Nazionale U16 (2011)${SEP_GERARCHIA}TYT${SEP_GERARCHIA}Raduno ${m[1]}`;
+  // Per il Kader A i singoli raduni non si etichettano separatamente: un solo
+  // gruppo "Kader A" senza numero di raduno.
+  if (/Kader A/i.test(nome)) return `Nazionale U16 (2011)${SEP_GERARCHIA}Kader A`;
+  m = /^Raduno\s+(\d+)\s+Ticino\s+U(\d+)$/i.exec(nome);
+  if (m) return `Partenariato Ticino (2012)`;
+  m = /^Rosa\s+(.+)$/i.exec(nome);
+  if (m) return m[1];
+  return nome;
+}
+
 function rinominaScout(vecchio, nuovo) {
   if (!vecchio || !nuovo || vecchio === nuovo) return 0;
   let conteggio = 0;
@@ -8635,6 +8800,21 @@ function renderStrumenti(content) {
       </div>
 
       <div class="import-subsection">
+        <h3>Etichetta da Raduno</h3>
+        <p class="muted">Applica un'etichetta in blocco a tutti i giocatori convocati (compresi i pikett/infortunati/rinunce presenti nella rosa) di un raduno, invece di aggiungerla a mano scheda per scheda. L'etichetta proposta è solo un suggerimento: correggila prima di applicare se non va bene.</p>
+        <div class="dropbox-step">
+          <select id="mnt-raduno-source">
+            <option value="">Scegli un raduno…</option>
+            ${raduni.map(r => `<option value="${esc(r.id)}">${esc(r.nome)} (${(r.rosa || []).length} in rosa)</option>`).join("")}
+          </select>
+          <input type="text" id="mnt-raduno-etichetta" list="mnt-etichette-datalist-raduno" placeholder="Etichetta da applicare">
+          <button class="btn btn-primary btn-sm" id="mnt-btn-etichetta-raduno" type="button">Applica a tutta la rosa</button>
+        </div>
+        <datalist id="mnt-etichette-datalist-raduno">${etichetteTutte.map(e => `<option value="${esc(e)}">`).join("")}</datalist>
+        <div id="mnt-raduno-etichetta-result"></div>
+      </div>
+
+      <div class="import-subsection">
         <h3>Unisci/rinomina etichette</h3>
         <p class="muted">Utile per unificare etichette scritte in modo diverso ma che indicano la stessa cosa (es. inserita a mano vs riconosciuta automaticamente da un PDF).</p>
         <div class="dropbox-step">
@@ -8875,6 +9055,27 @@ function renderStrumenti(content) {
     });
   }
   renderQuasiDuplicati();
+
+  document.getElementById("mnt-raduno-source").onchange = e => {
+    const r = raduni.find(x => x.id === e.target.value);
+    document.getElementById("mnt-raduno-etichetta").value = r ? etichettaSuggeritaDaRaduno(r.nome) : "";
+  };
+
+  document.getElementById("mnt-btn-etichetta-raduno").onclick = () => {
+    const radunoId = document.getElementById("mnt-raduno-source").value;
+    const etichetta = document.getElementById("mnt-raduno-etichetta").value.trim();
+    const risultato = document.getElementById("mnt-raduno-etichetta-result");
+    if (!radunoId) { alert("Scegli prima un raduno."); return; }
+    if (!etichetta) { alert("Scrivi (o correggi) l'etichetta da applicare."); return; }
+    const r = raduni.find(x => x.id === radunoId);
+    if (!r || !(r.rosa || []).length) {
+      risultato.innerHTML = `<div class="import-result import-result-warn">Questo raduno non ha nessun giocatore in rosa.</div>`;
+      return;
+    }
+    const conteggio = applicaEtichettaARosaRaduno(r, etichetta);
+    savePlayers();
+    risultato.innerHTML = `<div class="import-result">Etichetta "${esc(etichetta)}" applicata a ${conteggio} giocatori (su ${r.rosa.length} in rosa — gli altri la avevano già). Riapri "Strumenti" per vedere le liste aggiornate.</div>`;
+  };
 
   document.getElementById("mnt-btn-etichetta").onclick = () => {
     const vecchia = document.getElementById("mnt-etichetta-source").value;
