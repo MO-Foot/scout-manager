@@ -596,6 +596,22 @@ body{
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 14px;
 }
+/* Numero di colonne forzato dall'utente (pulsanti "Colonne" sopra l'elenco),
+   invece del riempimento automatico in base alla larghezza. Solo da tablet in
+   su: sotto i 721px vince comunque la regola mobile a 1 colonna più sotto. */
+@media (min-width: 721px){
+  .risultati-container.risultati-colonne-3{ grid-template-columns: repeat(3, 1fr); }
+  .risultati-container.risultati-colonne-4{ grid-template-columns: repeat(4, 1fr); }
+  .risultati-container.risultati-colonne-6{ grid-template-columns: repeat(6, 1fr); }
+  /* Evita il "grid blowout": senza min-width:0 le tracce 1fr non si restringono
+     sotto la larghezza minima del contenuto della card (testo/badge), causando
+     overflow orizzontale a 4-6 colonne su schermi stretti. */
+  .risultati-container.risultati-colonne-3 > .player-card,
+  .risultati-container.risultati-colonne-4 > .player-card,
+  .risultati-container.risultati-colonne-6 > .player-card{
+    min-width: 0;
+  }
+}
 
 .player-card{
   position: relative;
@@ -605,6 +621,22 @@ body{
   padding: 16px 16px 14px;
   cursor: pointer;
   transition: border-color .15s ease, transform .1s ease;
+  container-type: inline-size;
+}
+/* La card si compatta da sola in base alla propria larghezza effettiva (non al
+   numero di colonne): utile soprattutto a 4-6 colonne su schermi non larghissimi,
+   dove altrimenti nome/meta/badge si sovrappongono per mancanza di spazio. */
+@container (max-width: 230px){
+  .player-card{ padding: 10px 10px 8px; }
+  .card-header-row{ padding-right: 40px; gap: 6px; }
+  .card-radar-mini{ display: none; }
+  .card-photo{ width: 30px; height: 30px; }
+  .card-name{ font-size: 15px; overflow-wrap: anywhere; }
+  .card-name-nome{ font-size: 12px; }
+  .card-badge{ width: 24px; height: 24px; font-size: 10.5px; top: 8px; right: 8px; }
+  .card-meta{ font-size: 11px; }
+  .card-etichette, .card-ruoli{ gap: 4px; margin-top: 6px; }
+  .etichetta-badge, .categoria-badge, .tag{ font-size: 9.5px; padding: 2px 6px; }
 }
 .player-card:hover{
   border-color: var(--gold-dim);
@@ -2569,6 +2601,10 @@ let ordinamento = "cognome";
 // un nuovo criterio (da intestazione o da tendina) lo riporta a 1.
 let direzioneOrdinamento = 1;
 let vistaElenco = "schede";
+// Numero di colonne nella vista "Schede": "auto" lascia decidere alla
+// larghezza dello schermo (comportamento di sempre, una card ogni ~340px),
+// altrimenti è un numero fisso di colonne scelto dall'utente (3/4/6).
+let colonneSchede = "auto";
 let giocatoriFiltratiCorrente = [];
 let filtroEtichette = new Set();
 let filtroScouts = new Set();
@@ -4504,6 +4540,11 @@ function renderElenco(content) {
         <button type="button" class="vista-toggle-btn ${vistaElenco === "schede" ? "vista-attiva" : ""}" id="btn-vista-schede">Schede</button>
         <button type="button" class="vista-toggle-btn ${vistaElenco === "tabella" ? "vista-attiva" : ""}" id="btn-vista-tabella">Elenco</button>
       </span>
+      ${vistaElenco === "schede" ? `
+      <span style="display:flex; align-items:center; gap:6px;">
+        <span class="chips-label">Colonne:</span>
+        ${["auto", "3", "4", "6"].map(v => `<button type="button" class="vista-toggle-btn ${colonneSchede === v ? "vista-attiva" : ""}" data-colonne="${v}">${v === "auto" ? "Auto" : v}</button>`).join("")}
+      </span>` : ""}
       <button type="button" class="btn btn-primary btn-sm" id="btn-nuova-scheda">+ Nuova Scheda</button>
       <button type="button" class="btn btn-primary btn-sm" id="btn-importa-file">+ Importa file</button>
       <button type="button" class="btn btn-ghost btn-sm" id="btn-report">📄 Report</button>
@@ -4514,6 +4555,9 @@ function renderElenco(content) {
 
   document.getElementById("btn-vista-schede").onclick = () => { vistaElenco = "schede"; renderElenco(content); };
   document.getElementById("btn-vista-tabella").onclick = () => { vistaElenco = "tabella"; renderElenco(content); };
+  document.querySelectorAll("[data-colonne]").forEach(btn => {
+    btn.onclick = () => { colonneSchede = btn.dataset.colonne; renderElenco(content); };
+  });
   document.getElementById("btn-nuova-scheda").onclick = () => switchTab("nuova");
   document.getElementById("btn-importa-file").onclick = apriModalImportazione;
   document.getElementById("btn-report").onclick = apriModalReport;
@@ -4661,7 +4705,7 @@ function renderRisultati() {
     return;
   }
 
-  container.className = "risultati-container";
+  container.className = "risultati-container" + (colonneSchede !== "auto" ? ` risultati-colonne-${colonneSchede}` : "");
   container.innerHTML = filtered.map(p => cardHTML(p, filtroScouts)).join("");
   container.querySelectorAll(".player-card").forEach(el => {
     el.onclick = () => apriDettaglio(el.dataset.id);
