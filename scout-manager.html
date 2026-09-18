@@ -6636,9 +6636,13 @@ async function estraiHtmlDocx(file) {
 /* Formato tabellare: il modello "Modello_inserimento_valutazioni.docx"
    fornito allo scout, con una vera tabella Word (intestazione + una riga
    per giocatore): Data visionatura | Nome | Cognome | Data di nascita |
-   Squadra | Partita visionata | Nome scout | T | I | P | S | Commento.
+   Squadra | Partita visionata | Nome scout | T | I | P | S | POT | Commento.
    Le colonne T/I/P/S vanno cercate per uguaglianza esatta (non "includes"),
-   altrimenti "T" troverebbe anche l'intestazione "Data..." per errore. */
+   altrimenti "T" troverebbe anche l'intestazione "Data..." per errore.
+   La colonna del voto sul potenziale puo' comparire come intestazione
+   abbreviata "POT" (uguaglianza esatta, stesso motivo di T/I/P/S) oppure
+   scritta per esteso "Potenziale"/"Voto potenziale" in modelli piu' vecchi:
+   qui viene cercata con entrambe le varianti invece di essere ignorata. */
 function parseCandidatiDocxTabella(html, scoutDefault, nomeFile) {
   const container = document.createElement("div");
   container.innerHTML = html;
@@ -6675,6 +6679,7 @@ function parseCandidatiDocxTabella(html, scoutDefault, nomeFile) {
     const colI = trovaColonnaEsatta("i");
     const colP = trovaColonnaEsatta("p");
     const colS = trovaColonnaEsatta("s");
+    const colPot = trovaColonnaEsatta("pot") >= 0 ? trovaColonnaEsatta("pot") : trovaColonna("potenziale");
 
     // Se non troviamo almeno Nome o Cognome nell'intestazione, questa
     // tabella probabilmente non è nel nostro formato: la saltiamo invece
@@ -6693,6 +6698,7 @@ function parseCandidatiDocxTabella(html, scoutDefault, nomeFile) {
       if (colI >= 0 && celle[colI]) parametri.push({ label: "Intelligenza", valore: celle[colI].replace(",", ".") });
       if (colP >= 0 && celle[colP]) parametri.push({ label: "Personalità", valore: celle[colP].replace(",", ".") });
       if (colS >= 0 && celle[colS]) parametri.push({ label: "Speed", valore: celle[colS].replace(",", ".") });
+      if (colPot >= 0 && celle[colPot]) parametri.push({ label: "Potenziale", valore: celle[colPot].trim() });
 
       candidates.push({
         cognome, nome,
