@@ -899,6 +899,11 @@ body{
 .report-scheda-stampa .report-campo-riga{ display: flex; margin: 4px 0; font-size: 13px; }
 .report-scheda-stampa .report-campo-riga b{ flex: 0 0 150px; }
 .report-scheda-stampa .report-campo-riga .report-campo-valore{ flex: 1; min-width: 0; }
+/* Grafico Mirwald nelle schede PDF: blocco a tutta larghezza che non deve
+   mai spezzarsi fra due pagine, altrimenti la curva finisce tagliata. */
+.report-scheda-stampa .report-grafico-mirwald{ margin-top: 10px; page-break-inside: avoid; break-inside: avoid; clear: both; }
+.report-scheda-stampa .report-grafico-titolo{ font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+.report-scheda-stampa .report-grafico-mirwald svg{ display: block; }
 .modal-close{
   position: absolute; top: 14px; right: 14px;
   background: none; border: none; color: var(--muted);
@@ -1511,7 +1516,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
                capire, guardando qui, se il browser ha già caricato il file
                nuovo che hai appena messo su GitHub oppure sta ancora
                mostrando una copia vecchia rimasta in cache. -->
-          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 24/08/2026 · 13:35 (CEST)</div>
+          <div class="app-versione" title="Data e ora in cui questa versione del file è stata generata">Versione app: 12/10/2026 · 09:35 (CEST)</div>
         </div>
       </div>
     </header>
@@ -2879,13 +2884,24 @@ function radarChartSVG(medie, { size = 110, showLabels = true, className = "" } 
 // Grafico di crescita: età biologica misurata nel tempo, con la soglia
 // Grenzwerte (linea rossa) calcolata mese per mese per la categoria del
 // giocatore. Sotto la linea rossa = "tardivo" secondo le tabelle SFV/ASF.
-function graficoMirwaldSVG(player, { width = 560, height = 240 } = {}) {
+function graficoMirwaldSVG(player, { width = 560, height = 240, perStampa = false } = {}) {
+  // Su carta i colori dell'app non reggono: il testo degli assi (--muted,
+  // grigio-verde chiaro) sparisce sul bianco e l'alone dei punti (--bg,
+  // verde scuro) diventa un anello nero. In stampa usiamo quindi gli stessi
+  // token della palette ma nelle varianti adatte al fondo bianco — il
+  // disegno, le proporzioni e i dati restano identici a quelli della scheda.
+  const C = perStampa
+    ? { linea: "#9aa79f", testo: "#444444", gold: "#a6802f", low: "#c1554a", alone: "#ffffff" }
+    : { linea: "var(--line)", testo: "var(--muted)", gold: "var(--gold)", low: "var(--low)", alone: "var(--bg)" };
   const misurazioni = (player.misurazioni || [])
     .filter(m => m.data && m.etaBiologica !== null && m.etaBiologica !== undefined)
     .slice().sort((a, b) => (a.data || "").localeCompare(b.data || ""));
   if (!misurazioni.length) return `<p class="muted">Nessuna misurazione con età biologica disponibile.</p>`;
 
-  const padL = 46, padR = 18, padT = 16, padB = 32;
+  // padR largo quanto mezza etichetta data (gg/mm/aaaa, ~34px): l'ultimo
+  // punto sta sul bordo destro del grafico e la sua data è centrata su di
+  // esso, quindi con un margine stretto veniva tagliata ("16/09/20").
+  const padL = 46, padR = 38, padT = 16, padB = 32;
   const plotW = width - padL - padR, plotH = height - padT - padB;
 
   const date = misurazioni.map(m => new Date(m.data).getTime());
@@ -2907,51 +2923,51 @@ function graficoMirwaldSVG(player, { width = 560, height = 240 } = {}) {
   const step = rangeY > 4 ? 1 : 0.5;
   for (let v = Math.ceil(minY / step) * step; v <= maxY; v += step) {
     const y = yFor(v);
-    griglia += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1" opacity="0.35" />`;
-    griglia += `<text x="${padL - 8}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${v.toFixed(1)}</text>`;
+    griglia += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="${C.linea}" stroke-width="1" opacity="0.35" />`;
+    griglia += `<text x="${padL - 8}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-family="var(--font-mono)" font-size="10" fill="${C.testo}">${v.toFixed(1)}</text>`;
   }
 
   // etichette asse X (mese/anno di ogni misurazione)
   let etichetteX = "";
   misurazioni.forEach(m => {
     const x = xFor(new Date(m.data).getTime());
-    etichetteX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--muted)">${formatDataIt(m.data)}</text>`;
+    etichetteX += `<text x="${x.toFixed(1)}" y="${height - padB + 16}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="${C.testo}">${formatDataIt(m.data)}</text>`;
   });
 
   // linea rossa di soglia (Grenzwerte)
   let lineaSoglia = "", puntiSoglia = "";
   const puntiSogliaValidi = misurazioni.map((m, i) => ({ x: xFor(date[i]), y: soglie[i] !== null ? yFor(soglie[i]) : null })).filter(p => p.y !== null);
   if (puntiSogliaValidi.length >= 2) {
-    lineaSoglia = `<polyline points="${puntiSogliaValidi.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="var(--low)" stroke-width="2" stroke-dasharray="5,3" />`;
+    lineaSoglia = `<polyline points="${puntiSogliaValidi.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="${C.low}" stroke-width="2" stroke-dasharray="5,3" />`;
   }
   puntiSogliaValidi.forEach(p => {
-    puntiSoglia += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="var(--low)" />`;
+    puntiSoglia += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${C.low}" />`;
   });
 
   // linea gialla/oro: età biologica reale misurata
   const puntiEta = misurazioni.map((m, i) => ({ x: xFor(date[i]), y: yFor(m.etaBiologica) }));
   let lineaEta = "", cerchiEta = "";
   if (puntiEta.length >= 2) {
-    lineaEta = `<polyline points="${puntiEta.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="var(--gold)" stroke-width="2.5" />`;
+    lineaEta = `<polyline points="${puntiEta.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}" fill="none" stroke="${C.gold}" stroke-width="2.5" />`;
   }
   puntiEta.forEach(p => {
-    cerchiEta += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="var(--gold)" stroke="var(--bg)" stroke-width="1.5" />`;
+    cerchiEta += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${C.gold}" stroke="${C.alone}" stroke-width="1.5" />`;
   });
 
   return `
     <svg viewBox="0 0 ${width} ${height}" width="100%" style="max-width:${width}px;">
       ${griglia}
-      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="var(--line)" stroke-width="1" />
-      <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="var(--line)" stroke-width="1" />
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="${C.linea}" stroke-width="1" />
+      <line x1="${padL}" y1="${padT + plotH}" x2="${width - padR}" y2="${padT + plotH}" stroke="${C.linea}" stroke-width="1" />
       ${etichetteX}
       ${lineaSoglia}
       ${puntiSoglia}
       ${lineaEta}
       ${cerchiEta}
     </svg>
-    <div style="display:flex; gap:16px; font-size:11px; color: var(--muted); margin-top:4px;">
-      <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--gold); margin-right:5px;"></span>BioAlter misurato</span>
-      <span><span style="display:inline-block; width:10px; height:2px; background: var(--low); margin-right:5px; vertical-align:middle;"></span>Soglia "tardivo" (Grenzwerte SFV/ASF)</span>
+    <div class="mirwald-legenda" style="display:flex; gap:16px; font-size:11px; color: ${C.testo}; margin-top:4px;">
+      <span><svg width="10" height="10" style="vertical-align:middle; margin-right:5px;"><circle cx="5" cy="5" r="5" fill="${C.gold}" /></svg>BioAlter misurato</span>
+      <span><svg width="12" height="4" style="vertical-align:middle; margin-right:5px;"><rect width="12" height="2" y="1" fill="${C.low}" /></svg>Soglia "tardivo" (Grenzwerte SFV/ASF)</span>
     </div>`;
 }
 
@@ -4946,6 +4962,7 @@ const CAMPI_REPORT = [
   { chiave: "mediaTips", label: "Media Tips" },
   { chiave: "ultimaValutazione", label: "Ultima valutazione scritta", labelBreve: "Ultima valutazione" },
   { chiave: "datiFisici", label: "Dati fisici (Mirwald)", labelBreve: "Dati fisici" },
+  { chiave: "graficoMirwald", label: "Grafico Mirwald (BioAlter nel tempo)", labelBreve: "Grafico Mirwald", soloScheda: true },
   { chiave: "trasferimenti", label: "Storico trasferimenti", labelBreve: "Trasferimenti" },
   { chiave: "partite", label: "Partite recenti" },
   { chiave: "note", label: "Note generali", labelBreve: "Note" },
@@ -4957,6 +4974,13 @@ const PESI_COLONNA_REPORT = {
 };
 const REPORT_PRESET_BASE = ["dataNascita", "categoria", "squadra", "ruolo", "mediaTips"];
 const REPORT_PRESET_COMPLETO = CAMPI_REPORT.map(c => c.chiave);
+
+// Vero se il giocatore ha almeno una misurazione con BioAlter valorizzato:
+// è la stessa condizione che graficoMirwaldSVG usa per decidere se può
+// disegnare qualcosa, quindi nel report non stampiamo mai un riquadro vuoto.
+function haGraficoMirwald(p) {
+  return (p.misurazioni || []).some(m => m.data && m.etaBiologica !== null && m.etaBiologica !== undefined);
+}
 
 function troncaTesto(str, max) {
   if (!str) return "";
@@ -4994,6 +5018,10 @@ function valoreCampoReport(p, chiave) {
       if (p.sviluppoBiologico) parti.push(p.sviluppoBiologico);
       return parti.join(", ");
     }
+    // Non è un campo testuale: viene disegnato a parte come SVG nelle schede
+    // PDF. Restituendo stringa vuota non compare come riga "Grafico: ..." né
+    // sporca l'export Excel o la tabella compatta.
+    case "graficoMirwald": return "";
     case "trasferimenti":
       return (p.trasferimenti || []).map(t => `${formatDataIt(t.data)}: ${t.daSquadra || "?"} → ${t.aSquadra || "?"}`).join(" | ");
     case "partite":
@@ -5098,12 +5126,16 @@ function apriModalReport() {
     const layout = document.querySelector('input[name="report-layout"]:checked')?.value;
     document.getElementById("report-layout-wrap").style.display = formato === "excel" ? "none" : "";
     document.getElementById("report-scheda-perpagina-wrap").style.display = (formato !== "excel" && layout === "scheda") ? "" : "none";
-    const checkFoto = document.querySelector('.report-campo[value="foto"]');
-    const labelFoto = checkFoto.closest(".report-campo-check");
     const fotoOk = formato === "pdf" && layout === "scheda";
-    checkFoto.disabled = !fotoOk;
-    labelFoto.classList.toggle("disattivato", !fotoOk);
-    if (!fotoOk) checkFoto.checked = false;
+    // Foto e grafico Mirwald hanno lo stesso vincolo: esistono solo nelle
+    // schede dettagliate in PDF, non nella tabella compatta né in Excel.
+    ["foto", "graficoMirwald"].forEach(chiave => {
+      const check = document.querySelector(`.report-campo[value="${chiave}"]`);
+      if (!check) return;
+      check.disabled = !fotoOk;
+      check.closest(".report-campo-check").classList.toggle("disattivato", !fotoOk);
+      if (!fotoOk) check.checked = false;
+    });
   };
   document.querySelectorAll('input[name="report-formato"], input[name="report-layout"]').forEach(el => el.onchange = aggiornaStatoFoto);
   aggiornaStatoFoto();
@@ -5173,13 +5205,18 @@ function generaReportPDF(giocatori, campi, layout, unaPerPagina = true, nomeBase
       <div class="report-scheda-stampa${unaPerPagina ? "" : " report-scheda-compatta"}">
         ${(campi.includes("foto") && p.foto) ? `<img class="report-foto" src="${esc(p.foto)}" alt="">` : ""}
         <h3>${esc(p.cognome)} ${esc(p.nome)}</h3>
-        ${campi.filter(c => c !== "foto").map(c => {
+        ${campi.filter(c => c !== "foto" && c !== "graficoMirwald").map(c => {
           const val = valoreCampoReport(p, c);
           if (!val) return "";
           const def = CAMPI_REPORT.find(x => x.chiave === c);
           const label = def.labelBreve || def.label;
           return `<div class="report-campo-riga"><b>${esc(label)}:</b><span class="report-campo-valore">${esc(val)}</span></div>`;
         }).join("")}
+        ${(campi.includes("graficoMirwald") && haGraficoMirwald(p)) ? `
+        <div class="report-grafico-mirwald">
+          <div class="report-grafico-titolo">Mirwald — età biologica nel tempo</div>
+          ${graficoMirwaldSVG(p, { width: 520, height: unaPerPagina ? 210 : 160, perStampa: true })}
+        </div>` : ""}
       </div>${(!unaPerPagina && idx < giocatori.length - 1) ? `<hr class="report-divisore">` : ""}`).join("");
   }
 
